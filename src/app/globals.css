@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Dashboard Monitoring Kinerja Kredit
+   Tema  : Neumorphism - Palette BNI (Teal / Orange / Light Grey)
+   ============================================================ */
+
+@theme {
+  /* --- Palette BNI --- */
+  --color-bni-teal-950: #012f34;
+  --color-bni-teal-900: #00434b;
+  --color-bni-teal-800: #005861;
+  --color-bni-teal-700: #006a71;
+  --color-bni-teal-600: #0b8189;
+  --color-bni-teal-500: #159aa3;
+  --color-bni-teal-400: #46b7bf;
+  --color-bni-teal-300: #8ad4d9;
+  --color-bni-teal-100: #d6eff1;
+
+  --color-bni-orange-800: #a83c08; /* 5,4:1 - dipakai untuk teks aksen */
+  --color-bni-orange-700: #c94c11;
+  --color-bni-orange-600: #e35c14;
+  --color-bni-orange-500: #f26d21;
+  --color-bni-orange-400: #ff8a47;
+  --color-bni-orange-100: #ffe8d9;
+
+  /* --- Permukaan neumorphism --- */
+  --color-surface: #e9eef2;
+  --color-surface-raised: #eef2f6;
+  --color-surface-sunken: #dfe5eb;
+
+  /* Ink: seluruh token teks di bawah ini >= 4.5:1 terhadap --color-surface. */
+  --color-ink-900: #1e2a32; /* 12,6:1 */
+  --color-ink-700: #3c4c58; /* 7,6:1  */
+  --color-ink-500: #566878; /* 4,9:1  */
+  --color-ink-300: #9aa9b5; /* dekoratif: border & placeholder saja */
+
+  /* --- Warna status ---
+     Dipakai sebagai mark (indikator/bar) DAN sebagai teks; versi `-text`
+     sengaja lebih gelap agar lolos kontras teks WCAG AA.
+     Status tidak pernah dipakai ulang sebagai warna seri grafik. */
+  --color-state-good: #0f8a5f;
+  --color-state-warn: #d98c0a;
+  --color-state-bad: #d64545;
+  --color-state-good-text: #0f6b4a; /* 5,6:1 */
+  --color-state-warn-text: #8a5a00; /* 5,1:1 */
+  --color-state-bad-text: #a8322c;  /* 5,7:1 */
+
+  /* --- Palet grafik ---
+     Dua seri kategorikal, urutannya tetap (tidak pernah diputar).
+     Divalidasi terhadap surface #e9eef2: lolos lightness band, chroma floor,
+     separasi CVD (deltaE 18,2 protan), normal-vision floor, dan kontras 3:1. */
+  --color-chart-realisasi: #0097a7;
+  --color-chart-target: #e35c14;
+
+  /* Ramp sekuensial satu hue untuk tingkat keparahan (kolektibilitas & DPD):
+     makin gelap = makin berisiko. Bukan warna kategorikal. */
+  --color-sev-1: #fdc9a5;
+  --color-sev-2: #f9b184;
+  --color-sev-3: #ef8a4a;
+  --color-sev-4: #d1601f;
+  --color-sev-5: #9c3f0e;
+
+  /* Ramp sekuensial teal untuk tahapan funnel (prospek -> analisa -> booking). */
+  --color-funnel-1: #7fd0da;
+  --color-funnel-2: #2ba7b4;
+  --color-funnel-3: #00707c;
+
+  /* --- Bayangan neumorphism --- */
+  --shadow-neu: 6px 6px 14px #c5cdd6, -6px -6px 14px #ffffff;
+  --shadow-neu-sm: 3px 3px 7px #c9d1da, -3px -3px 7px #ffffff;
+  --shadow-neu-lg: 12px 12px 26px #c2cad3, -12px -12px 26px #ffffff;
+  --shadow-neu-inset: inset 4px 4px 9px #c9d1da, inset -4px -4px 9px #ffffff;
+  --shadow-neu-inset-sm: inset 2px 2px 5px #ccd4dc, inset -2px -2px 5px #ffffff;
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   Utilities neumorphism
+   ============================================================ */
+
+@utility neu {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu);
+}
+
+@utility neu-sm {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu-sm);
+}
+
+@utility neu-lg {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu-lg);
+}
+
+@utility neu-inset {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu-inset);
+}
+
+@utility neu-inset-sm {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu-inset-sm);
+}
+
+/* Tombol / kontrol yang bisa ditekan */
+@utility neu-press {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-neu-sm);
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    color 180ms ease;
+
+  &:hover {
+    box-shadow: var(--shadow-neu);
+  }
+
+  &:active {
+    box-shadow: var(--shadow-neu-inset-sm);
+    transform: translateY(1px);
+  }
+}
+
+/* Scrollbar halus di dalam tabel */
+@utility neu-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-300) transparent;
+
+  &::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--color-ink-300);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+}
+
+/* ============================================================
+   Aksesibilitas & animasi
+   ============================================================ */
+
+*:focus-visible {
+  outline: 2px solid var(--color-bni-teal-600);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+@keyframes neu-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility animate-fade-up {
+  animation: neu-fade-up 320ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
