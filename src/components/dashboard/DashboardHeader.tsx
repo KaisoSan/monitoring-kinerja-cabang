@@ -1,20 +1,16 @@
 import Link from "next/link";
 import { LayoutDashboard, Settings2 } from "lucide-react";
-import { Badge } from "@/components/ui/Badge";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { formatPeriode } from "@/lib/format";
-import type { DashboardSource } from "@/lib/data";
 
 export function DashboardHeader({
   periode,
-  source,
   totalRows,
   userEmail,
 }: {
   periode: string | null;
-  source: DashboardSource;
   totalRows: number;
-  /** Email sesi aktif; kosong saat berjalan dengan data contoh. */
+  /** Email sesi aktif; kosong bila belum login. */
   userEmail: string | null;
 }) {
   return (
@@ -39,9 +35,6 @@ export function DashboardHeader({
         </div>
 
         <div className="flex items-center gap-3">
-          <Badge tone={source === "supabase" ? "teal" : "orange"}>
-            {source === "supabase" ? "Data Supabase" : "Data Contoh"}
-          </Badge>
           <Link
             href="/admin"
             className="neu-press text-ink-700 flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold"

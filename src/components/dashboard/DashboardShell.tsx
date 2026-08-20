@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Info } from "lucide-react";
 import { GlobalSlicer } from "./GlobalSlicer";
 import { PilarPencapaian } from "./PilarPencapaian";
 import { PilarPipeline } from "./PilarPipeline";
@@ -41,11 +40,9 @@ const SECTIONS = [
 export function DashboardShell({
   records,
   targets,
-  notice,
 }: {
   records: KreditRecord[];
   targets: TargetCabang[];
-  notice: string | null;
 }) {
   const [slicer, setSlicer] = useState<SlicerState>(EMPTY_SLICER);
 
@@ -83,13 +80,6 @@ export function DashboardShell({
 
   return (
     <div className="space-y-5">
-      {notice ? (
-        <div className="neu text-ink-700 flex items-start gap-3 rounded-3xl px-5 py-4 text-sm">
-          <Info size={18} className="text-bni-orange-800 mt-0.5 shrink-0" />
-          <p>{notice}</p>
-        </div>
-      ) : null}
-
       <GlobalSlicer
         slicer={slicer}
         options={view.options}

@@ -95,12 +95,15 @@ file `.xlsx` / `.xls` / `.xlsm` / `.csv` yang:
 - mengirim data ke Supabase secara **batch** dengan `upsert`, dan
 - memberi notifikasi toast untuk status loading, sukses, dan error.
 
-### Berjalan tanpa Supabase
-Bila environment Supabase belum diisi, tidak ada data asli yang bisa dibuka,
-sehingga login tidak diwajibkan dan dashboard otomatis menampilkan
-**dataset contoh deterministik** (12 cabang, 3 Area Head, 3 produk, ~30
-pengelola) sehingga UI langsung bisa dinilai. Sebuah banner menandai bahwa
-data yang tampil adalah data contoh.
+### Sumber data
+Seluruh angka pada dashboard — kartu, grafik, opsi Slicer, dan Tabel Data
+Detail — berasal dari tabel Supabase, tanpa perantara data contoh.
+
+Bila data tidak bisa dibaca, dashboard **menyatakan sebabnya** alih-alih
+menampilkan angka pengganti: environment belum diisi, sesi berakhir, kueri
+gagal, atau tabel memang masih kosong. Ini disengaja — pada dashboard kredit,
+angka contoh yang tampil seolah-olah data asli jauh lebih berbahaya daripada
+halaman kosong.
 
 ---
 
@@ -112,7 +115,6 @@ npm run dev
 ```
 
 Buka <http://localhost:3000>. Tanpa konfigurasi apa pun, dashboard sudah tampil
-memakai data contoh.
 
 ---
 
@@ -175,7 +177,7 @@ npm run dev
 ```
 
 Buka `/admin`, login, lalu unggah file Excel. Setelah unggahan sukses, buka `/`
-— banner "Data Contoh" akan berganti menjadi "Data Supabase".
+data cabang Anda akan langsung tampil di seluruh pilar dan Slicer.
 
 ---
 
@@ -257,8 +259,7 @@ src/
 │   ├── navigation.ts            Penyaring redirect `next` (anti open redirect)
 │   ├── sanitize.ts              Pembersih karakter yang ditolak PostgreSQL
 │   ├── metrics.ts               Seluruh agregasi & rumus pilar
-│   ├── data.ts                  Pemuat data Supabase + fallback contoh
-│   ├── sample-data.ts           Dataset contoh deterministik
+│   ├── data.ts                  Pemuat data Supabase (tanpa data contoh)
 │   ├── format.ts                Format rupiah, persen, periode
 │   └── supabase/                Klien browser, server, dan service role
 ├── proxy.ts                     Penjaga sesi untuk /, /admin, dan /api/records
@@ -308,6 +309,24 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 ---
 
 ## Pemecahan Masalah
+
+### Dashboard kosong padahal data sudah masuk Supabase
+
+Dashboard tidak pernah menampilkan angka pengganti, jadi kartu status yang
+muncul menyebutkan sebabnya:
+
+| Pesan | Artinya |
+|---|---|
+| Supabase belum dikonfigurasi | `.env.local` belum diisi, atau belum terbaca oleh proses yang sedang berjalan (di hosting: env belum diset lalu redeploy). |
+| Sesi tidak ditemukan | Belum login. Kebijakan RLS hanya membuka data untuk pengguna terautentikasi. |
+| Data gagal dimuat | Pesan asli dari Supabase ikut ditampilkan — biasanya `supabase/schema.sql` belum dijalankan di project tersebut. |
+| Belum ada data kredit | Koneksi sehat, tetapi tabel `kredit_records` masih kosong. |
+
+Seluruh halaman dan route data memakai `dynamic = "force-dynamic"`,
+`revalidate = 0`, dan `fetchCache = "force-no-store"`, serta memanggil
+Supabase dengan `cache: "no-store"`. Setelah unggahan sukses, uploader juga
+memanggil `router.refresh()` sehingga data baru langsung terlihat tanpa
+tersangkut cache.
 
 ### `unsupported Unicode escape sequence` saat mengunggah
 

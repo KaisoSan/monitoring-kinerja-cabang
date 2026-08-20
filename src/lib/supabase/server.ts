@@ -11,6 +11,12 @@ export async function createServerSupabase() {
   const cookieStore = await cookies();
 
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    // Dashboard harus selalu menampilkan posisi terbaru: setiap permintaan ke
+    // Supabase dipaksa melewati cache Next, sehingga data yang baru diunggah
+    // langsung terlihat tanpa perlu menunggu revalidasi.
+    global: {
+      fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    },
     cookies: {
       getAll() {
         return cookieStore.getAll();

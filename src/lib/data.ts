@@ -1,22 +1,35 @@
 import "server-only";
 
-import { buildSampleRaw, buildSampleRecords, buildSampleTargets } from "./sample-data";
-import { filterRecords } from "./metrics";
-import { EMPTY_SLICER, type SlicerState } from "./types";
 import { createServerSupabase } from "./supabase/server";
 import { isSupabaseConfigured } from "./supabase/config";
-import type { KreditRecord, TargetCabang } from "./types";
+import type { KreditRecord, SlicerState, TargetCabang } from "./types";
 
-export type DashboardSource = "supabase" | "sample";
+/**
+ * Dashboard HANYA menampilkan data dari Supabase.
+ *
+ * Sebelumnya ada dataset contoh yang otomatis dipakai ketika pembacaan gagal.
+ * Perilaku itu dicabut: pada dashboard kredit, angka contoh yang tampil
+ * seolah-olah data asli jauh lebih berbahaya daripada halaman kosong. Kini
+ * setiap kegagalan dilaporkan apa adanya lewat `state` dan `message`.
+ */
+export type DashboardState =
+  /** Data berhasil dimuat (boleh saja kosong bila tabel memang kosong). */
+  | "ok"
+  /** Environment Supabase belum diisi. */
+  | "belum-dikonfigurasi"
+  /** Tidak ada sesi login, sehingga RLS menutup seluruh baris. */
+  | "tanpa-sesi"
+  /** Kueri ke Supabase gagal. */
+  | "galat";
 
 export type DashboardData = {
   records: KreditRecord[];
   targets: TargetCabang[];
-  source: DashboardSource;
   /** Periode terakhir yang tersedia, format `YYYY-MM-DD`. */
   periode: string | null;
-  /** Alasan fallback ke data contoh, ditampilkan sebagai banner. */
-  notice: string | null;
+  state: DashboardState;
+  /** Penjelasan yang ditampilkan ke pengguna saat `state` bukan `ok`. */
+  message: string | null;
 };
 
 const PAGE_SIZE = 1000;
@@ -33,48 +46,31 @@ const TYPED_COLUMNS =
   "status_pipeline, plafon, baki_debet, baki_debet_awal, kolektibilitas, dpd, " +
   "is_restruktur, tanggal_booking";
 
-/**
- * Dataset contoh dibangkitkan sekali lalu dipakai ulang: generatornya
- * deterministik, jadi memoisasi menjaga nomor urut baris tetap konsisten
- * antara dashboard dan Tabel Data Detail.
- */
-let sampleCache: { records: KreditRecord[]; targets: TargetCabang[] } | null = null;
+const NOT_CONFIGURED =
+  "Environment Supabase belum diisi. Salin .env.example menjadi .env.local, " +
+  "isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY, lalu " +
+  "jalankan ulang aplikasi.";
 
-function sampleDataset() {
-  if (!sampleCache) {
-    const records = buildSampleRecords();
-    sampleCache = { records, targets: buildSampleTargets(records) };
-  }
-  return sampleCache;
-}
+const NO_SESSION =
+  "Sesi tidak ditemukan atau sudah berakhir. Kebijakan RLS hanya mengizinkan " +
+  "pembacaan untuk pengguna yang sudah login, jadi silakan masuk kembali.";
 
-function sampleData(notice: string | null): DashboardData {
-  const { records, targets } = sampleDataset();
-  return {
-    records,
-    targets,
-    source: "sample",
-    periode: records[0]?.periode ?? null,
-    notice,
-  };
+function emptyResult(state: DashboardState, message: string | null): DashboardData {
+  return { records: [], targets: [], periode: null, state, message };
 }
 
 /**
- * Mengambil data periode terakhir dari Supabase. Bila Supabase belum
- * dikonfigurasi, tabel belum dibuat, atau masih kosong, dashboard memakai
- * dataset contoh agar tetap bisa dibuka.
+ * Memuat data periode terakhir dari Supabase. Tidak pernah mengarang data:
+ * bila gagal, `records` kosong dan alasannya dibawa di `message`.
  */
 export async function loadDashboardData(): Promise<DashboardData> {
-  if (!isSupabaseConfigured) {
-    return sampleData(
-      "Supabase belum dikonfigurasi. Dashboard sedang menampilkan data contoh.",
-    );
-  }
+  if (!isSupabaseConfigured) return emptyResult("belum-dikonfigurasi", NOT_CONFIGURED);
 
   const supabase = await createServerSupabase();
-  if (!supabase) {
-    return sampleData("Klien Supabase gagal dibuat. Menampilkan data contoh.");
-  }
+  if (!supabase) return emptyResult("belum-dikonfigurasi", NOT_CONFIGURED);
+
+  const { data: session } = await supabase.auth.getUser();
+  if (!session?.user) return emptyResult("tanpa-sesi", NO_SESSION);
 
   const latest = await supabase
     .from("kredit_records")
@@ -84,31 +80,16 @@ export async function loadDashboardData(): Promise<DashboardData> {
     .maybeSingle();
 
   if (latest.error) {
-    return sampleData(
-      `Gagal membaca tabel kredit_records (${latest.error.message}). ` +
-        "Pastikan supabase/schema.sql sudah dijalankan. Menampilkan data contoh.",
+    return emptyResult(
+      "galat",
+      `Gagal membaca tabel kredit_records: ${latest.error.message}. ` +
+        "Pastikan supabase/schema.sql sudah dijalankan pada project ini.",
     );
   }
 
   const periode = latest.data?.periode ?? null;
-  if (!periode) {
-    // RLS hanya mengizinkan baca untuk sesi yang valid, jadi hasil kosong bisa
-    // berarti tabel memang kosong ATAU sesi sudah kedaluwarsa. Bedakan supaya
-    // pesannya tidak menyesatkan.
-    const { data: session } = await supabase.auth.getUser();
-    if (!session?.user) {
-      return sampleData(
-        "Sesi tidak ditemukan atau sudah berakhir, sehingga data kredit tidak " +
-          "dapat dibaca. Silakan login kembali. Sementara ini dashboard " +
-          "menampilkan data contoh.",
-      );
-    }
-
-    return sampleData(
-      "Tabel kredit_records masih kosong. Unggah data lewat /admin. " +
-        "Sementara ini dashboard menampilkan data contoh.",
-    );
-  }
+  // Tabel kosong bukan kegagalan; dashboard menampilkan keadaan kosong apa adanya.
+  if (!periode) return { records: [], targets: [], periode: null, state: "ok", message: null };
 
   const records: KreditRecord[] = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -121,9 +102,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
       .range(from, from + PAGE_SIZE - 1);
 
     if (error) {
-      return sampleData(
-        `Gagal memuat data kredit (${error.message}). Menampilkan data contoh.`,
-      );
+      return emptyResult("galat", `Gagal memuat data kredit: ${error.message}`);
     }
     if (!data || data.length === 0) break;
 
@@ -140,9 +119,14 @@ export async function loadDashboardData(): Promise<DashboardData> {
   // Cast: tanpa tipe hasil generate Supabase, inferensi select string tidak
   // menghasilkan bentuk baris yang berguna.
   const targetRows = (targetQuery.data ?? []) as unknown as RawRecord[];
-  const targets = targetRows.map(normalizeTarget);
 
-  return { records, targets, source: "supabase", periode, notice: null };
+  return {
+    records,
+    targets: targetRows.map(normalizeTarget),
+    periode,
+    state: "ok",
+    message: null,
+  };
 }
 
 /* Supabase mengembalikan kolom numeric sebagai string; normalkan ke number. */
@@ -202,8 +186,9 @@ export type DetailQuery = {
 export type DetailPage = {
   rows: KreditRecord[];
   total: number;
-  source: DashboardSource;
   periode: string | null;
+  state: DashboardState;
+  message: string | null;
 };
 
 /**
@@ -216,69 +201,70 @@ export async function loadDetailRecords({
   page,
   pageSize,
 }: DetailQuery): Promise<DetailPage> {
+  const empty = (state: DashboardState, message: string | null): DetailPage => ({
+    rows: [],
+    total: 0,
+    periode: null,
+    state,
+    message,
+  });
+
+  if (!isSupabaseConfigured) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+
+  const supabase = await createServerSupabase();
+  if (!supabase) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+
+  const { data: session } = await supabase.auth.getUser();
+  if (!session?.user) return empty("tanpa-sesi", NO_SESSION);
+
   const safePage = Math.max(0, Math.floor(page));
   const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
   const from = safePage * safeSize;
 
-  const supabase = isSupabaseConfigured ? await createServerSupabase() : null;
+  const latest = await supabase
+    .from("kredit_records")
+    .select("periode")
+    .order("periode", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  if (supabase) {
-    const latest = await supabase
-      .from("kredit_records")
-      .select("periode")
-      .order("periode", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const periode = latest.error ? null : (latest.data?.periode ?? null);
-
-    if (periode) {
-      let query = supabase
-        .from("kredit_records")
-        .select(`${TYPED_COLUMNS}, raw`, { count: "exact" })
-        .eq("periode", periode);
-
-      for (const key of ["area_head", "cabang", "produk", "pengelola"] as const) {
-        const value = slicer[key];
-        if (value) query = query.eq(key, value);
-      }
-
-      const { data, error, count } = await query
-        .order("kode_fasilitas", { ascending: true })
-        .range(from, from + safeSize - 1);
-
-      if (!error) {
-        const rows = (data ?? []) as unknown as RawRecord[];
-        return {
-          rows: rows.map((row) => ({
-            ...normalizeRecord(row),
-            raw:
-              row.raw && typeof row.raw === "object"
-                ? (row.raw as Record<string, unknown>)
-                : {},
-          })),
-          total: count ?? rows.length,
-          source: "supabase",
-          periode,
-        };
-      }
-    }
+  if (latest.error) {
+    return empty("galat", `Gagal membaca periode terakhir: ${latest.error.message}`);
   }
 
-  // Mode data contoh: filter dan potong di memori, lalu lampirkan snapshot.
-  const { records } = sampleDataset();
-  const filtered = filterRecords(records, { ...EMPTY_SLICER, ...slicer });
-  // Nomor urut ("No") mengikuti posisi baris pada dataset penuh, bukan
-  // posisi setelah difilter, agar identitas barisnya tetap sama.
-  const positions = new Map(records.map((record, index) => [record.kode_fasilitas, index]));
+  const periode = latest.data?.periode ?? null;
+  if (!periode) return { rows: [], total: 0, periode: null, state: "ok", message: null };
 
+  let query = supabase
+    .from("kredit_records")
+    .select(`${TYPED_COLUMNS}, raw`, { count: "exact" })
+    .eq("periode", periode);
+
+  for (const key of ["area_head", "cabang", "produk", "pengelola"] as const) {
+    const value = slicer[key];
+    if (value) query = query.eq(key, value);
+  }
+
+  const { data, error, count } = await query
+    .order("kode_fasilitas", { ascending: true })
+    .range(from, from + safeSize - 1);
+
+  if (error) {
+    return empty("galat", `Gagal memuat data detail: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as unknown as RawRecord[];
   return {
-    rows: filtered.slice(from, from + safeSize).map((record) => ({
-      ...record,
-      raw: buildSampleRaw(record, positions.get(record.kode_fasilitas) ?? 0),
+    rows: rows.map((row) => ({
+      ...normalizeRecord(row),
+      raw:
+        row.raw && typeof row.raw === "object"
+          ? (row.raw as Record<string, unknown>)
+          : {},
     })),
-    total: filtered.length,
-    source: "sample",
-    periode: records[0]?.periode ?? null,
+    total: count ?? rows.length,
+    periode,
+    state: "ok",
+    message: null,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import {
   CheckCircle2,
@@ -50,6 +51,7 @@ function currentMonth(): string {
 }
 
 export function ExcelUploader({ enabled }: { enabled: boolean }) {
+  const router = useRouter();
   const [dataset, setDataset] = useState<UploadDataset>("kredit_records");
   const [periode, setPeriode] = useState(currentMonth());
   const [dragging, setDragging] = useState(false);
@@ -184,6 +186,9 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
       setParsed(null);
       setLastFile(null);
       if (inputRef.current) inputRef.current.value = "";
+      // Buang cache router agar dashboard dan riwayat unggahan langsung
+      // memuat ulang data yang baru masuk.
+      router.refresh();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Terjadi kesalahan saat mengunggah.",

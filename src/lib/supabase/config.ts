@@ -2,8 +2,8 @@ export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 /**
- * Dashboard tetap bisa dijalankan sebelum Supabase dikonfigurasi; saat env
- * belum diisi, data dashboard jatuh ke dataset contoh (lihat `sample-data.ts`).
+ * Seluruh data dashboard berasal dari Supabase. Saat env belum diisi,
+ * dashboard menampilkan pesan setup, bukan data contoh.
  */
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 

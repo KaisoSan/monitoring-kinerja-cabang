@@ -5,6 +5,8 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { EMPTY_SLICER, SLICER_KEYS, type SlicerState } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;

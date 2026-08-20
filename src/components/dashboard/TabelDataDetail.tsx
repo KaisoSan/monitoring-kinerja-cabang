@@ -64,12 +64,28 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
 
         const response = await fetch(`/api/records?${params}`, {
           signal: controller.signal,
+          // Tabel harus mengikuti isi database saat ini, bukan salinan lama.
+          cache: "no-store",
         });
-        if (!response.ok) throw new Error(`Server menjawab ${response.status}.`);
 
-        const payload = (await response.json()) as { rows: KreditRecord[]; total: number };
+        const payload = (await response.json()) as {
+          rows?: KreditRecord[];
+          total?: number;
+          message?: string | null;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(
+            payload.error ?? payload.message ?? `Server menjawab ${response.status}.`,
+          );
+        }
+
         setRows(payload.rows ?? []);
         setTotal(payload.total ?? 0);
+        // Kegagalan yang tidak berupa status HTTP (mis. sesi berakhir)
+        // dilaporkan lewat `message`.
+        setError(payload.message ?? null);
       } catch (cause) {
         if (controller.signal.aborted) return;
         setRows([]);
