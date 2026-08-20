@@ -181,3 +181,152 @@ export function buildSampleTargets(records: KreditRecord[]): TargetCabang[] {
     };
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Snapshot kolom sumber untuk data contoh                             */
+/* ------------------------------------------------------------------ */
+
+const SEKTOR = [
+  ["4711", "Perdagangan Eceran", "12", "Perdagangan Besar dan Eceran"],
+  ["1071", "Industri Roti dan Kue", "05", "Industri Pengolahan"],
+  ["4100", "Konstruksi Gedung", "09", "Konstruksi"],
+  ["0111", "Pertanian Padi", "01", "Pertanian dan Kehutanan"],
+  ["5610", "Restoran", "13", "Penyediaan Akomodasi dan Makan Minum"],
+  ["4922", "Angkutan Darat", "10", "Transportasi dan Pergudangan"],
+];
+
+const PERUNTUKAN = ["Modal Kerja", "Investasi", "Konsumtif"];
+const INSTITUSI = ["Perorangan", "Badan Usaha", "Koperasi"];
+const JENIS_KUR = ["KUR Mikro", "KUR Kecil", "KUR Super Mikro", "-"];
+const KET_KOL_1 = ["Lancar Murni", "Lancar Pernah Tunggak", "-"];
+
+/** PRNG kecil ber-seed dari string, supaya nilainya stabil per rekening. */
+function seededFrom(text: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return mulberry32(hash >>> 0);
+}
+
+function addMonths(iso: string, months: number): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + months, day));
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Membentuk snapshot 86 kolom untuk satu baris data contoh. Nilai diturunkan
+ * dari record itu sendiri agar konsisten dengan angka di kartu dan grafik,
+ * sisanya dibangkitkan deterministik dari `kode_fasilitas`.
+ */
+export function buildSampleRaw(
+  record: KreditRecord,
+  index: number,
+): Record<string, unknown> {
+  const rand = seededFrom(record.kode_fasilitas);
+  const sektor = SEKTOR[Math.floor(rand() * SEKTOR.length)];
+  const kodeCabang = `0${100 + (index % 90)}`;
+  const jangkaWaktu = [12, 24, 36, 48, 60][Math.floor(rand() * 5)];
+  const jatuhTempo = addMonths(record.tanggal_booking ?? record.periode, jangkaWaktu);
+  const [jtYear, jtMonth, jtDay] = jatuhTempo.split("-");
+
+  const tgkPokok = record.dpd > 0 ? Math.round(record.baki_debet * 0.02) : 0;
+  const tgkBunga = record.dpd > 0 ? Math.round(record.baki_debet * 0.004) : 0;
+  const sukuBunga = Number((7 + rand() * 5).toFixed(2));
+  const bcmSehat = record.kolektibilitas === 1 && record.dpd === 0;
+
+  return {
+    no: index + 1,
+    tanggal: record.periode,
+    kode_cab: kodeCabang,
+    nama_cab: record.cabang,
+    kode_kln: `${kodeCabang}1`,
+    sentra_code: `S${200 + (index % 40)}`,
+    kode_kcp: `${kodeCabang}9`,
+    account_type: record.produk === "KUR" ? "KUR" : "KOM",
+    sub_category: record.produk === "SME" ? "SME-01" : `${record.produk}-02`,
+    produk: record.produk,
+    peruntukan: PERUNTUKAN[Math.floor(rand() * PERUNTUKAN.length)],
+    currency: "IDR",
+    kurs: 1,
+    cif: `${8000000 + index * 7}`,
+    no_rek: record.kode_fasilitas,
+    nama_nas: record.nama_debitur,
+    kol: record.kolektibilitas,
+    maks_krd: record.plafon,
+    ijin_tarik: Math.max(0, record.plafon - record.baki_debet),
+    saldo_pokok: record.baki_debet,
+    tgk_pokok: tgkPokok,
+    tgk_bunga: tgkBunga,
+    denda: record.dpd > 90 ? Math.round(tgkBunga * 0.1) : 0,
+    tgk_biaya: 0,
+    bk_debet: record.baki_debet,
+    bk_dbt_idr: record.baki_debet,
+    disponible: Math.max(0, record.plafon - record.baki_debet),
+    suku_bunga: sukuBunga,
+    suku_bunga_efektif: Number((sukuBunga + 0.35).toFixed(2)),
+    jw: jangkaWaktu,
+    jth_tempo: jatuhTempo,
+    umur_tgk_hr: record.dpd,
+    kode_segmen: record.produk === "KUR" ? "KUR" : "SME",
+    kode_sektor_ek_new: sektor[0],
+    sektor_ek_desc_new: sektor[1],
+    "20_group_sektor_ek_new": sektor[2],
+    "20_group_sektor_ek_desc_new": sektor[3],
+    npp: `NPP${1000 + (index % 300)}`,
+    nama_pengelola: record.pengelola,
+    propisi: Math.round(record.plafon * 0.01),
+    pembebanan_bunga: "Efektif",
+    ppap_idr: Math.round(record.baki_debet * (record.kolektibilitas >= 3 ? 0.5 : 0.01)),
+    no_rek_afi: `${9000000000 + index * 13}`,
+    ccy_rek_afi: "IDR",
+    jadwal_angs_pok: "Bulanan",
+    akum_by_bg_akrual: Math.round(record.baki_debet * 0.003),
+    by_bg_harian: Math.round((record.baki_debet * sukuBunga) / 36500),
+    saldo_akhir_afi: Math.round(record.baki_debet * 0.05 * rand()),
+    saldo_blokir_afi: 0,
+    saldo_efektif_afi: Math.round(record.baki_debet * 0.04 * rand()),
+    kode_inst: `I${10 + (index % 5)}`,
+    institusi: INSTITUSI[Math.floor(rand() * INSTITUSI.length)],
+    tgl_buka_rek: record.tanggal_booking ?? record.periode,
+    tgl_pk: record.tanggal_booking ?? record.periode,
+    no_pk: `PK-${String(index + 1).padStart(5, "0")}`,
+    restrukturisasi: record.is_restruktur ? "Ya" : "Tidak",
+    kode_flag_covid: "N",
+    desk_flag_covid: "Non Covid",
+    ang_pokok_idr: Math.round(record.baki_debet / jangkaWaktu),
+    tunda_jatuh_tempo: "Tidak",
+    tanggal_tunda_jt: null,
+    tipe_debitur: INSTITUSI[Math.floor(rand() * INSTITUSI.length)],
+    special_int_rate: 0,
+    gross_rate: Number((sukuBunga + 1.1).toFixed(2)),
+    flag_esg: rand() < 0.15 ? "Y" : "N",
+    nama_flag_esg: rand() < 0.15 ? "Pembiayaan Berkelanjutan" : "-",
+    kode_grup_perusahaan: rand() < 0.2 ? `GRP-${100 + (index % 20)}` : "-",
+    id_referral_sapm: rand() < 0.3 ? `SAPM-${index % 500}` : "-",
+    clean_basis: rand() < 0.1 ? "Y" : "N",
+    flag_xpora: rand() < 0.08 ? "Y" : "N",
+    jenis_kredit: record.produk === "KUR" ? "KUR" : "Komersial",
+    jenis_kur: record.produk === "KUR"
+      ? JENIS_KUR[Math.floor(rand() * 3)]
+      : "-",
+    outlet: record.cabang,
+    ket_kol_1: record.kolektibilitas === 1
+      ? KET_KOL_1[Math.floor(rand() * 2)]
+      : "-",
+    kewajiban_dspa: Math.round(record.baki_debet * 0.02),
+    kewajiban_dsra: Math.round(record.baki_debet * 0.01),
+    afil_kewajiban: Math.round(record.baki_debet * 0.03),
+    afil_kewajiban_dspa: Math.round(record.baki_debet * 0.015),
+    dspa: Math.round(record.baki_debet * 0.02 * rand()),
+    dsra: Math.round(record.baki_debet * 0.01 * rand()),
+    ketersediaan_dspa: rand() < 0.7 ? "Tersedia" : "Belum",
+    "jth_tempo_tgl": Number(jtDay),
+    "jth_tempo_bulan": Number(jtMonth),
+    "jth_tempo_tahun": Number(jtYear),
+    "jth_tempo_ket": jatuhTempo <= record.periode ? "Jatuh Tempo" : "Belum Jatuh Tempo",
+    cek_bcm: bcmSehat ? "OK" : record.kolektibilitas >= 3 ? "NPL" : "PERHATIAN",
+  };
+}

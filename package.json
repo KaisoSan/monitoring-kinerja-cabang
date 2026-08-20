@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test tests/*.test.mts",
-    "template": "node scripts/generate-template.mjs"
+    "template": "tsx scripts/generate-template.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

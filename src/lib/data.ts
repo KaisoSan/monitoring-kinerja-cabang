@@ -1,6 +1,8 @@
 import "server-only";
 
-import { buildSampleRecords, buildSampleTargets } from "./sample-data";
+import { buildSampleRaw, buildSampleRecords, buildSampleTargets } from "./sample-data";
+import { filterRecords } from "./metrics";
+import { EMPTY_SLICER, type SlicerState } from "./types";
 import { createServerSupabase } from "./supabase/server";
 import { isSupabaseConfigured } from "./supabase/config";
 import type { KreditRecord, TargetCabang } from "./types";
@@ -20,11 +22,37 @@ export type DashboardData = {
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 25; // batas aman: 25.000 baris per periode
 
+/**
+ * Kolom bertipe yang dibutuhkan agregasi. Snapshot `raw` sengaja TIDAK ikut
+ * dimuat di sini: dashboard mengirim seluruh baris ke browser, dan membawa
+ * 86 kolom per baris akan membengkakkan payload. Tabel Data Detail mengambil
+ * `raw` sendiri per halaman lewat `loadDetailRecords`.
+ */
+const TYPED_COLUMNS =
+  "kode_fasilitas, periode, area_head, cabang, produk, pengelola, nama_debitur, " +
+  "status_pipeline, plafon, baki_debet, baki_debet_awal, kolektibilitas, dpd, " +
+  "is_restruktur, tanggal_booking";
+
+/**
+ * Dataset contoh dibangkitkan sekali lalu dipakai ulang: generatornya
+ * deterministik, jadi memoisasi menjaga nomor urut baris tetap konsisten
+ * antara dashboard dan Tabel Data Detail.
+ */
+let sampleCache: { records: KreditRecord[]; targets: TargetCabang[] } | null = null;
+
+function sampleDataset() {
+  if (!sampleCache) {
+    const records = buildSampleRecords();
+    sampleCache = { records, targets: buildSampleTargets(records) };
+  }
+  return sampleCache;
+}
+
 function sampleData(notice: string | null): DashboardData {
-  const records = buildSampleRecords();
+  const { records, targets } = sampleDataset();
   return {
     records,
-    targets: buildSampleTargets(records),
+    targets,
     source: "sample",
     periode: records[0]?.periode ?? null,
     notice,
@@ -75,11 +103,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     const from = page * PAGE_SIZE;
     const { data, error } = await supabase
       .from("kredit_records")
-      .select(
-        "kode_fasilitas, periode, area_head, cabang, produk, pengelola, nama_debitur, " +
-          "status_pipeline, plafon, baki_debet, baki_debet_awal, kolektibilitas, dpd, " +
-          "is_restruktur, tanggal_booking",
-      )
+      .select(TYPED_COLUMNS)
       .eq("periode", periode)
       .order("kode_fasilitas", { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -150,5 +174,99 @@ function normalizeTarget(row: RawRecord): TargetCabang {
     produk: str(row.produk, "Lainnya"),
     target_baki_debet: num(row.target_baki_debet),
     target_booking_nominal: num(row.target_booking_nominal),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Tabel Data Detail                                                   */
+/* ------------------------------------------------------------------ */
+
+export type DetailQuery = {
+  slicer: SlicerState;
+  page: number;
+  pageSize: number;
+};
+
+export type DetailPage = {
+  rows: KreditRecord[];
+  total: number;
+  source: DashboardSource;
+  periode: string | null;
+};
+
+/**
+ * Mengambil satu halaman data level rekening lengkap dengan snapshot kolom
+ * asli. Dipisah dari `loadDashboardData` supaya payload dashboard tetap
+ * ringan sementara tabel detail tetap bisa menampilkan 86 kolom.
+ */
+export async function loadDetailRecords({
+  slicer,
+  page,
+  pageSize,
+}: DetailQuery): Promise<DetailPage> {
+  const safePage = Math.max(0, Math.floor(page));
+  const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
+  const from = safePage * safeSize;
+
+  const supabase = isSupabaseConfigured ? await createServerSupabase() : null;
+
+  if (supabase) {
+    const latest = await supabase
+      .from("kredit_records")
+      .select("periode")
+      .order("periode", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const periode = latest.error ? null : (latest.data?.periode ?? null);
+
+    if (periode) {
+      let query = supabase
+        .from("kredit_records")
+        .select(`${TYPED_COLUMNS}, raw`, { count: "exact" })
+        .eq("periode", periode);
+
+      for (const key of ["area_head", "cabang", "produk", "pengelola"] as const) {
+        const value = slicer[key];
+        if (value) query = query.eq(key, value);
+      }
+
+      const { data, error, count } = await query
+        .order("kode_fasilitas", { ascending: true })
+        .range(from, from + safeSize - 1);
+
+      if (!error) {
+        const rows = (data ?? []) as unknown as RawRecord[];
+        return {
+          rows: rows.map((row) => ({
+            ...normalizeRecord(row),
+            raw:
+              row.raw && typeof row.raw === "object"
+                ? (row.raw as Record<string, unknown>)
+                : {},
+          })),
+          total: count ?? rows.length,
+          source: "supabase",
+          periode,
+        };
+      }
+    }
+  }
+
+  // Mode data contoh: filter dan potong di memori, lalu lampirkan snapshot.
+  const { records } = sampleDataset();
+  const filtered = filterRecords(records, { ...EMPTY_SLICER, ...slicer });
+  // Nomor urut ("No") mengikuti posisi baris pada dataset penuh, bukan
+  // posisi setelah difilter, agar identitas barisnya tetap sama.
+  const positions = new Map(records.map((record, index) => [record.kode_fasilitas, index]));
+
+  return {
+    rows: filtered.slice(from, from + safeSize).map((record) => ({
+      ...record,
+      raw: buildSampleRaw(record, positions.get(record.kode_fasilitas) ?? 0),
+    })),
+    total: filtered.length,
+    source: "sample",
+    periode: records[0]?.periode ?? null,
   };
 }

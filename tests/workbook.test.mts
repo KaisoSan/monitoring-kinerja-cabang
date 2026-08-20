@@ -86,3 +86,84 @@ test("mapTargetCabang membaca file target contoh", async () => {
   assert.equal(rows[0].target_baki_debet, 5_000_000_000);
   assert.equal(rows[0].target_booking_nominal, 1_200_000_000);
 });
+
+test("file 86 kolom terbaca menjadi field bertipe sekaligus snapshot kolom asli", async () => {
+  const { DETAIL_COLUMNS } = await import("../src/lib/columns.ts");
+
+  const file = await loadFile("contoh/contoh-86-kolom.xlsx", "contoh-86-kolom.xlsx");
+  const workbook = await readWorkbook(file);
+
+  assert.equal(workbook.rows.length, 3);
+  assert.equal(workbook.rawRows.length, 3);
+
+  const { rows, issues } = mapKreditRecords(workbook.rows, "2026-08-01", workbook.rawRows);
+  assert.equal(issues.length, 0);
+  assert.equal(rows.length, 3);
+
+  // Kolom kunci file sumber terpetakan ke field bertipe yang dipakai pilar.
+  const first = rows[0];
+  assert.equal(first.kode_fasilitas, "FAS-86001");
+  assert.equal(first.cabang, "KCP Menteng");
+  assert.equal(first.nama_debitur, "PT Maju Sentosa");
+  assert.equal(first.pengelola, "Andi Pratama");
+  assert.equal(first.baki_debet, 4_250_000_000);
+  assert.equal(first.plafon, 5_000_000_000);
+  assert.equal(first.kolektibilitas, 1);
+  assert.equal(first.periode, "2026-08-01");
+
+  const kedua = rows[1];
+  assert.equal(kedua.dpd, 45);
+  assert.equal(kedua.kolektibilitas, 2);
+  assert.equal(kedua.is_restruktur, true);
+
+  // Seluruh kolom terisi tersedia di snapshot, termasuk yang tidak punya
+  // padanan field bertipe. Sel kosong sengaja tidak disimpan.
+  const raw = first.raw ?? {};
+  const KOSONG_DI_FIXTURE = ["Tanggal_Tunda_JT"];
+  const missing = DETAIL_COLUMNS.filter((column) => !Object.hasOwn(raw, column.key));
+  assert.deepEqual(
+    missing.map((column) => column.label),
+    KOSONG_DI_FIXTURE,
+    "setiap kolom sumber yang terisi harus punya kunci di snapshot",
+  );
+
+  assert.equal(raw.cek_bcm, "OK");
+  assert.equal(raw.jenis_kur, "-");
+  // "Produk" dan "JENIS KREDIT" beraliaskan sama, tetapi snapshot memisahkan.
+  assert.equal(raw.produk, "SME");
+  assert.equal(raw.jenis_kredit, "Komersial");
+});
+
+test("getCellValue jatuh ke field bertipe saat snapshot kosong", async () => {
+  const { DETAIL_COLUMNS_BY_LABEL, getCellValue } = await import("../src/lib/columns.ts");
+
+  const record = {
+    kode_fasilitas: "FAS-1",
+    periode: "2026-08-01",
+    area_head: "AH 1",
+    cabang: "KCP Menteng",
+    produk: "SME",
+    pengelola: "Andi",
+    nama_debitur: "PT Maju",
+    status_pipeline: "booking" as const,
+    plafon: 1000,
+    baki_debet: 900,
+    baki_debet_awal: 800,
+    kolektibilitas: 2,
+    dpd: 10,
+    is_restruktur: false,
+    tanggal_booking: null,
+    raw: {},
+  };
+
+  const cabang = DETAIL_COLUMNS_BY_LABEL.get("Nama Cab")!;
+  const bcm = DETAIL_COLUMNS_BY_LABEL.get("CEK BCM")!;
+
+  assert.equal(getCellValue(record, cabang), "KCP Menteng");
+  // Tidak punya padanan bertipe, jadi tetap kosong.
+  assert.equal(getCellValue(record, bcm), null);
+
+  // Snapshot selalu menang atas field bertipe.
+  const withRaw = { ...record, raw: { nama_cab: "KC Bandung" } };
+  assert.equal(getCellValue(withRaw, cabang), "KC Bandung");
+});

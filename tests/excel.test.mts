@@ -120,3 +120,45 @@ test("normalizeHeader melepas satuan di belakang nama kolom", () => {
   // Nama kolom yang memang berakhiran satuan tetap tidak hilang seluruhnya.
   assert.equal(normalizeHeader("Rp"), "rp");
 });
+
+test("normalizeHeader mengenali nama kolom dari file sumber 86 kolom", () => {
+  assert.equal(normalizeHeader("Nama Cab"), "cabang");
+  assert.equal(normalizeHeader("Nama Nas"), "nama_debitur");
+  assert.equal(normalizeHeader("Bk Debet"), "baki_debet");
+  assert.equal(normalizeHeader("Bk Dbt (IDR)"), "baki_debet");
+  assert.equal(normalizeHeader("No Rek."), "kode_fasilitas");
+  assert.equal(normalizeHeader("Maks Krd"), "plafon");
+  assert.equal(normalizeHeader("Umur Tgk (hr)"), "dpd");
+  assert.equal(normalizeHeader("Kol."), "kolektibilitas");
+  assert.equal(normalizeHeader("Nama Pengelola"), "pengelola");
+  assert.equal(normalizeHeader(".Tanggal."), "periode");
+  assert.equal(normalizeHeader("Restrukturisasi"), "is_restruktur");
+});
+
+test("status disimpulkan saat file sumber tidak punya kolom status", () => {
+  const { rows } = mapKreditRecords(
+    [
+      // Sudah berjalan: ada outstanding, walau kolom status tidak ada.
+      { kode_fasilitas: "A", cabang: "KCP A", baki_debet: "1.000.000.000" },
+      // Ada tanggal booking tapi outstanding sudah lunas.
+      { kode_fasilitas: "B", cabang: "KCP A", baki_debet: "0", tanggal_booking: "01/02/2026" },
+      // Tanpa keduanya: tetap dianggap prospek.
+      { kode_fasilitas: "C", cabang: "KCP A", plafon: "500.000.000" },
+      // Status eksplisit selalu menang atas inferensi.
+      { kode_fasilitas: "D", cabang: "KCP A", baki_debet: "900.000.000", status_pipeline: "Prospek" },
+    ],
+    "2026-08-01",
+  );
+
+  assert.equal(rows[0].status_pipeline, "booking");
+  assert.equal(rows[0].baki_debet, 1_000_000_000);
+
+  assert.equal(rows[1].status_pipeline, "booking");
+  assert.equal(rows[1].tanggal_booking, "2026-02-01");
+
+  assert.equal(rows[2].status_pipeline, "prospek");
+  assert.equal(rows[2].baki_debet, 0);
+
+  assert.equal(rows[3].status_pipeline, "prospek");
+  assert.equal(rows[3].baki_debet, 0, "status eksplisit tetap menolkan outstanding");
+});

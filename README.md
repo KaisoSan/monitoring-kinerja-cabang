@@ -41,6 +41,28 @@ pencarian saat daftarnya panjang.
 | **3. Produktivitas** | Leaderboard Top 10 pengelola dan Bottom 10 (otomatis menampilkan yang **nihil booking** bila ada) |
 | **4. Kualitas Kredit** | Rasio LAR, NPL, dan portofolio menunggak; sebaran DPD; komposisi kolektibilitas; tabel indikator risiko per cabang |
 
+### Tabel Data Detail + Column Chooser
+
+Di bawah keempat pilar terdapat tabel data level rekening yang juga mengikuti
+slicer global. Tombol **Pilih Kolom** membuka daftar checkbox berisi seluruh
+**86 kolom file sumber**:
+
+- Saat pertama dibuka hanya 6 kolom esensial yang tampil:
+  `Nama Cab`, `Nama Pengelola`, `Nama Nas`, `Bk Debet`, `Kol.`, `CEK BCM`.
+- Mencentang kolom lain langsung menambahkannya ke tabel secara real-time.
+- Kolom selalu dirender mengikuti urutan file sumber, bukan urutan
+  pencentangan, supaya posisinya tidak berpindah-pindah.
+- Tersedia pencarian nama kolom serta tombol **Pilih Semua**, **Kosongkan**,
+  dan **Kolom Esensial**.
+- Data diambil per halaman (50 baris) lewat `GET /api/records`, sehingga
+  membuka 86 kolom tidak membebani payload dashboard.
+
+Agar kolom apa pun bisa ditampilkan tanpa menambah kolom baru di database,
+setiap baris menyimpan **snapshot kolom asli** pada kolom `raw` (JSONB),
+dikunci nama kolom aslinya dalam snake_case. Kolom yang punya padanan field
+bertipe (mis. `Bk Debet` -> `baki_debet`) tetap jatuh ke field tersebut bila
+snapshot kosong, misalnya pada data yang diunggah sebelum fitur ini ada.
+
 ### Halaman Admin (`/admin`)
 Dilindungi Supabase Auth + allowlist email. Berisi area **drag & drop** untuk
 file `.xlsx` / `.xls` / `.xlsm` / `.csv` yang:
@@ -138,7 +160,13 @@ Hasilkan file contoh berisi header yang sengaja dibuat berantakan:
 npm run template
 ```
 
-File tersimpan di `contoh/`. Gunakan file ini untuk menguji uploader.
+Tiga berkas tersimpan di `contoh/`:
+
+| Berkas | Isi |
+|---|---|
+| `contoh-data-kredit.xlsx` | Contoh ringkas dengan header berantakan |
+| `contoh-target-cabang.xlsx` | Contoh target per cabang/produk |
+| `contoh-86-kolom.xlsx` | Meniru layout asli 86 kolom, untuk menguji uploader sekaligus Tabel Data Detail |
 
 ### Kolom `kredit_records`
 
@@ -164,8 +192,15 @@ Satuan di belakang nama kolom (`(Rp)`, `(Juta)`, `(Hari)`) otomatis dilepas.
 Nilai `status_pipeline` menerima sinonim: `On Process` → `analisa`,
 `Realisasi`/`Cair` → `booking`, dan seterusnya.
 
-Kolom yang tidak ada di daftar akan diabaikan. Untuk menambah alias baru,
-sunting `HEADER_ALIASES` di [`src/lib/excel.ts`](src/lib/excel.ts).
+Kolom yang tidak ada di daftar tetap tersimpan pada snapshot `raw` dan bisa
+ditampilkan lewat Column Chooser, hanya saja tidak ikut dihitung pada pilar.
+Untuk menambah alias baru, sunting `HEADER_ALIASES` di
+[`src/lib/excel.ts`](src/lib/excel.ts).
+
+**Kolom status bersifat opsional.** Ekstrak portofolio umumnya tidak punya
+kolom status karena seluruh isinya sudah berjalan. Bila kolom status tidak
+ditemukan, baris yang punya baki debet atau tanggal booking otomatis dianggap
+`booking`; sisanya `prospek`.
 
 ### Kolom `target_cabang`
 
@@ -182,12 +217,14 @@ src/
 │   ├── page.tsx                 Dashboard (Server Component)
 │   ├── admin/page.tsx           Halaman admin + riwayat unggahan
 │   ├── admin/login/page.tsx     Login Supabase Auth
+│   ├── api/records/route.ts     Satu halaman data detail (86 kolom)
 │   └── api/upload/route.ts      Upsert batch dengan service role
 ├── components/
 │   ├── dashboard/               Slicer, header, dan 4 pilar
 │   ├── admin/                   Uploader Excel, form login
 │   └── ui/                      Primitif neumorphism
 ├── lib/
+│   ├── columns.ts               Definisi 86 kolom + kolom default
 │   ├── excel.ts                 Pembersih header + parser workbook
 │   ├── metrics.ts               Seluruh agregasi & rumus pilar
 │   ├── data.ts                  Pemuat data Supabase + fallback contoh
@@ -219,6 +256,8 @@ Seluruh rumus terkumpul di [`src/lib/metrics.ts`](src/lib/metrics.ts).
   pengelola sudah membukukan booking, tabel jatuh ke performa terendah.
 - Baris yang belum `booking` selalu dipaksa `baki_debet = 0` agar pipeline
   tidak mengembang menjadi outstanding.
+- `CIF` **tidak** dipakai sebagai kunci fasilitas: satu CIF bisa memiliki
+  banyak rekening, sehingga kuncinya adalah `No Rek.`.
 
 Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 [`src/components/dashboard/PilarKualitas.tsx`](src/components/dashboard/PilarKualitas.tsx).
@@ -245,6 +284,11 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 - Route upload memverifikasi sesi Supabase **dan** allowlist `ADMIN_EMAILS`,
   lalu menyaring ulang setiap baris di server — payload dari browser tidak
   pernah dipercaya apa adanya.
+- **Tabel Data Detail memaparkan field level rekening** (CIF, nomor rekening,
+  nama nasabah) lewat `GET /api/records`. Endpoint ini mengikuti kebijakan RLS
+  `kredit_records`; dengan kebijakan bawaan yang mengizinkan baca publik, data
+  tersebut dapat diakses siapa pun yang mengetahui URL-nya. Perketat dulu
+  sebelum dipakai produksi.
 - Kebijakan bawaan mengizinkan `select` publik pada data kredit. Bila dashboard
   perlu dibatasi ke user internal, ubah kebijakan tersebut menjadi
   `to authenticated` (lihat catatan di akhir `supabase/schema.sql`) dan

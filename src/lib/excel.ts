@@ -42,11 +42,11 @@ const HEADER_ALIASES: Record<string, string> = {
   // identitas
   kode: "kode_fasilitas",
   kode_fasilitas: "kode_fasilitas",
+  no_rek: "kode_fasilitas",
   no_rekening: "kode_fasilitas",
   nomor_rekening: "kode_fasilitas",
   no_aplikasi: "kode_fasilitas",
   nomor_aplikasi: "kode_fasilitas",
-  cif: "kode_fasilitas",
 
   // dimensi
   ah: "area_head",
@@ -57,6 +57,7 @@ const HEADER_ALIASES: Record<string, string> = {
 
   cabang: "cabang",
   kcp: "cabang",
+  nama_cab: "cabang",
   nama_cabang: "cabang",
   nama_cabang_kcp: "cabang",
   cabang_kcp: "cabang",
@@ -80,11 +81,13 @@ const HEADER_ALIASES: Record<string, string> = {
 
   debitur: "nama_debitur",
   nama_debitur: "nama_debitur",
+  nama_nas: "nama_debitur",
   nama_nasabah: "nama_debitur",
   nasabah: "nama_debitur",
 
   // periode & status
   periode: "periode",
+  tanggal: "periode",
   bulan: "periode",
   periode_laporan: "periode",
   tanggal_laporan: "periode",
@@ -98,12 +101,16 @@ const HEADER_ALIASES: Record<string, string> = {
   // nominal
   plafon: "plafon",
   plafond: "plafon",
+  maks_krd: "plafon",
+  maks_kredit: "plafon",
   plafon_rp: "plafon",
   limit: "plafon",
   nominal: "plafon",
   nominal_usulan: "plafon",
 
   os: "baki_debet",
+  bk_debet: "baki_debet",
+  bk_dbt: "baki_debet",
   outstanding: "baki_debet",
   baki_debet: "baki_debet",
   baki_debet_rp: "baki_debet",
@@ -123,6 +130,7 @@ const HEADER_ALIASES: Record<string, string> = {
 
   dpd: "dpd",
   dpd_hari: "dpd",
+  umur_tgk: "dpd",
   tunggakan: "dpd",
   hari_tunggakan: "dpd",
   days_past_due: "dpd",
@@ -152,7 +160,7 @@ const HEADER_ALIASES: Record<string, string> = {
  */
 const UNIT_SUFFIXES = [
   "rp", "idr", "rupiah", "juta", "jt", "miliar", "milyar",
-  "ribu", "hari", "persen", "pct", "x",
+  "ribu", "hari", "hr", "persen", "pct", "x",
 ];
 
 function stripUnitSuffix(snake: string): string {
@@ -358,7 +366,14 @@ export type ParseResult<T> = {
 export async function readWorkbook(
   file: File,
   sheetName?: string,
-): Promise<{ rows: RawRow[]; headerMap: ParseResult<never>["headerMap"]; sheetName: string; sheetNames: string[] }> {
+): Promise<{
+  rows: RawRow[];
+  /** Sejajar dengan `rows`, dikunci nama kolom asli (tanpa alias). */
+  rawRows: RawRow[];
+  headerMap: ParseResult<never>["headerMap"];
+  sheetName: string;
+  sheetNames: string[];
+}> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
 
@@ -391,18 +406,41 @@ export async function readWorkbook(
     return normalized;
   });
 
+  // Kunci snapshot sengaja tidak melewati alias: dua kolom sumber yang
+  // beraliaskan sama (mis. "Produk" dan "JENIS KREDIT") tetap terpisah.
+  const seenSnapshot = new Map<string, number>();
+  const snapshotHeaders = rawHeaders.map((original) => {
+    if (!original) return "";
+    const base = toSnakeCase(original);
+    const count = seenSnapshot.get(base) ?? 0;
+    seenSnapshot.set(base, count + 1);
+    return count > 0 ? `${base}_${count + 1}` : base;
+  });
+
   const rows: RawRow[] = [];
+  const rawRows: RawRow[] = [];
   for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
     const cells = matrix[i] ?? [];
     if (cells.every((cell) => cell === null || cell === undefined || cell === "")) continue;
+
     const row: RawRow = {};
     normalizedHeaders.forEach((key, index) => {
       if (key) row[key] = cells[index] ?? null;
     });
     rows.push(row);
+
+    const snapshot: RawRow = {};
+    snapshotHeaders.forEach((key, index) => {
+      if (!key) return;
+      const cell = cells[index];
+      if (cell === null || cell === undefined || cell === "") return;
+      // Tanggal disimpan sebagai ISO agar aman melewati JSON.
+      snapshot[key] = cell instanceof Date ? (toIsoDate(cell) ?? null) : cell;
+    });
+    rawRows.push(snapshot);
   }
 
-  return { rows, headerMap, sheetName: targetSheet, sheetNames: workbook.SheetNames };
+  return { rows, rawRows, headerMap, sheetName: targetSheet, sheetNames: workbook.SheetNames };
 }
 
 /**
@@ -436,7 +474,11 @@ const FALLBACK_PERIODE = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 };
 
-export function mapKreditRecords(rows: RawRow[], defaultPeriode?: string) {
+export function mapKreditRecords(
+  rows: RawRow[],
+  defaultPeriode?: string,
+  rawRows: RawRow[] = [],
+) {
   const periodeDefault = defaultPeriode ?? FALLBACK_PERIODE();
   const issues: ParseIssue[] = [];
   const mapped: KreditRecord[] = [];
@@ -452,9 +494,19 @@ export function mapKreditRecords(rows: RawRow[], defaultPeriode?: string) {
       return;
     }
 
-    const status = toStatusPipeline(row.status_pipeline);
-    const isBooking = status === "booking";
     const bakiDebet = toNumber(row.baki_debet);
+    const tanggalBooking = toIsoDate(row.tanggal_booking);
+
+    // Ekstrak portofolio biasanya tidak punya kolom status karena seluruh
+    // isinya sudah berjalan. Tanpa inferensi ini, setiap baris akan jatuh
+    // ke "prospek" dan outstanding-nya dinolkan.
+    const statusText = toText(row.status_pipeline);
+    const status: StatusPipeline = statusText
+      ? toStatusPipeline(statusText)
+      : bakiDebet > 0 || tanggalBooking
+        ? "booking"
+        : "prospek";
+    const isBooking = status === "booking";
 
     let kode = toText(row.kode_fasilitas);
     if (!kode) {
@@ -486,7 +538,8 @@ export function mapKreditRecords(rows: RawRow[], defaultPeriode?: string) {
       kolektibilitas: clampKol(toNumber(row.kolektibilitas)),
       dpd: Math.max(0, Math.round(toNumber(row.dpd))),
       is_restruktur: toBoolean(row.is_restruktur),
-      tanggal_booking: isBooking ? toIsoDate(row.tanggal_booking) : null,
+      tanggal_booking: isBooking ? tanggalBooking : null,
+      raw: rawRows[index] ?? {},
     });
   });
 
@@ -542,9 +595,10 @@ export function mapRowsForDataset(
   dataset: UploadDataset,
   rows: RawRow[],
   defaultPeriode?: string,
+  rawRows: RawRow[] = [],
 ) {
   return dataset === "kredit_records"
-    ? mapKreditRecords(rows, defaultPeriode)
+    ? mapKreditRecords(rows, defaultPeriode, rawRows)
     : mapTargetCabang(rows, defaultPeriode);
 }
 

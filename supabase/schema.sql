@@ -26,6 +26,10 @@ create table if not exists public.kredit_records (
   dpd               integer not null default 0 check (dpd >= 0),
   is_restruktur     boolean not null default false,
   tanggal_booking   date,
+  -- Snapshot seluruh kolom file sumber, dikunci nama kolom asli dalam
+  -- snake_case. Dipakai Tabel Data Detail untuk menampilkan kolom apa pun
+  -- tanpa perlu menambah kolom baru di tabel ini.
+  raw               jsonb not null default '{}'::jsonb,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -36,6 +40,10 @@ create index if not exists kredit_records_cabang_idx     on public.kredit_record
 create index if not exists kredit_records_produk_idx     on public.kredit_records (produk);
 create index if not exists kredit_records_pengelola_idx  on public.kredit_records (pengelola);
 create index if not exists kredit_records_status_idx     on public.kredit_records (status_pipeline);
+
+-- Untuk instalasi yang dibuat sebelum kolom `raw` ada.
+alter table public.kredit_records
+  add column if not exists raw jsonb not null default '{}'::jsonb;
 
 -- -------------------------------------------------------------
 -- 2. Target per cabang & produk

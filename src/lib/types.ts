@@ -38,6 +38,13 @@ export type KreditRecord = {
   /** Penanda kredit hasil restrukturisasi (komponen LAR). */
   is_restruktur: boolean;
   tanggal_booking: string | null;
+  /**
+   * Snapshot seluruh kolom file sumber, dikunci dengan `toSnakeCase` dari
+   * nama kolom aslinya (tanpa pemetaan alias, sehingga setiap kolom sumber
+   * punya kunci sendiri). Dipakai Tabel Data Detail agar kolom apa pun bisa
+   * ditampilkan tanpa perlu menambah kolom baru di database.
+   */
+  raw?: Record<string, unknown>;
 };
 
 export type TargetCabang = {

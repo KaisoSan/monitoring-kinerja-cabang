@@ -13,6 +13,9 @@ import {
 /** Baris dikirim per batch agar request ke PostgREST tidak timeout. */
 const BATCH_SIZE = 500;
 const MAX_ROWS = 50_000;
+/** Batas snapshot kolom asli per baris, menjaga ukuran baris tetap wajar. */
+const MAX_RAW_KEYS = 200;
+const MAX_RAW_VALUE_LENGTH = 500;
 
 const VALID_STATUS = new Set<string>([...PIPELINE_STAGES, ...PIPELINE_DROPPED]);
 
@@ -177,7 +180,31 @@ function sanitizeKreditRecord(row: Json): Json | null {
     dpd: Math.max(0, Math.round(numeric(row.dpd))),
     is_restruktur: Boolean(row.is_restruktur),
     tanggal_booking: isoDate(row.tanggal_booking),
+    raw: sanitizeRaw(row.raw),
   };
+}
+
+/**
+ * Snapshot kolom asli dibatasi jumlah kunci dan panjang nilainya, dan hanya
+ * menerima tipe primitif — payload dari browser tidak dipercaya apa adanya.
+ */
+function sanitizeRaw(value: unknown): Json {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const result: Json = {};
+  let count = 0;
+  for (const [key, cell] of Object.entries(value as Json)) {
+    if (count >= MAX_RAW_KEYS) break;
+    if (cell === null || cell === undefined || cell === "") continue;
+
+    if (typeof cell === "number" && Number.isFinite(cell)) result[key] = cell;
+    else if (typeof cell === "boolean") result[key] = cell;
+    else if (typeof cell === "string") result[key] = cell.slice(0, MAX_RAW_VALUE_LENGTH);
+    else continue;
+
+    count += 1;
+  }
+  return result;
 }
 
 function sanitizeTargetCabang(row: Json): Json | null {

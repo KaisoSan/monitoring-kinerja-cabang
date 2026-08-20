@@ -30,7 +30,7 @@ import {
 
 const ACCEPTED = [".xlsx", ".xls", ".xlsm", ".csv"];
 /** Baris per request; server memecah lagi menjadi batch upsert 500 baris. */
-const CHUNK_SIZE = 1000;
+const CHUNK_SIZE = 400;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 type Parsed = {
@@ -81,7 +81,12 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
 
       try {
         const workbook = await readWorkbook(file, sheetName);
-        const { rows, issues } = mapRowsForDataset(dataset, workbook.rows, defaultPeriode);
+        const { rows, issues } = mapRowsForDataset(
+          dataset,
+          workbook.rows,
+          defaultPeriode,
+          workbook.rawRows,
+        );
         const headers = workbook.headerMap.map((entry) => entry.normalized);
         const missingColumns = findMissingColumns(dataset, headers);
 

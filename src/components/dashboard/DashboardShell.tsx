@@ -7,6 +7,7 @@ import { PilarPencapaian } from "./PilarPencapaian";
 import { PilarPipeline } from "./PilarPipeline";
 import { PilarProduktivitas } from "./PilarProduktivitas";
 import { PilarKualitas } from "./PilarKualitas";
+import { TabelDataDetail } from "./TabelDataDetail";
 import {
   buildFunnel,
   buildKualitasPerCabang,
@@ -34,6 +35,7 @@ const SECTIONS = [
   { id: "pilar-pipeline", label: "Pipeline" },
   { id: "pilar-produktivitas", label: "Produktivitas" },
   { id: "pilar-kualitas", label: "Kualitas Kredit" },
+  { id: "tabel-detail", label: "Data Detail" },
 ];
 
 export function DashboardShell({
@@ -124,6 +126,10 @@ export function DashboardShell({
 
       <section id="pilar-kualitas" className="scroll-mt-44">
         <PilarKualitas summary={view.kualitas} perCabang={view.kualitasPerCabang} />
+      </section>
+
+      <section id="tabel-detail" className="scroll-mt-44">
+        <TabelDataDetail slicer={slicer} />
       </section>
     </div>
   );
