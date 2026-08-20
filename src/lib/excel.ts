@@ -1,4 +1,6 @@
 import * as XLSX from "xlsx";
+
+import { sanitizeDeep, sanitizeText } from "./sanitize";
 import {
   PIPELINE_DROPPED,
   PIPELINE_STAGES,
@@ -250,7 +252,9 @@ export function toBoolean(value: unknown): boolean {
 
 export function toText(value: unknown, fallback = ""): string {
   if (value === null || value === undefined) return fallback;
-  const text = String(value).replace(/\s+/g, " ").trim();
+  // `\s` tidak mencakup NUL, jadi pembersihan harus dilakukan terpisah
+  // sebelum spasi dirapikan.
+  const text = sanitizeText(String(value)).replace(/\s+/g, " ").trim();
   return text || fallback;
 }
 
@@ -434,8 +438,11 @@ export async function readWorkbook(
       if (!key) return;
       const cell = cells[index];
       if (cell === null || cell === undefined || cell === "") return;
-      // Tanggal disimpan sebagai ISO agar aman melewati JSON.
-      snapshot[key] = cell instanceof Date ? (toIsoDate(cell) ?? null) : cell;
+      // Tanggal disimpan sebagai ISO agar aman melewati JSON. Nilai teks
+      // dibersihkan di sini karena snapshot tidak melewati `toText`.
+      if (cell instanceof Date) snapshot[key] = toIsoDate(cell) ?? null;
+      else if (typeof cell === "string") snapshot[key] = sanitizeText(cell);
+      else snapshot[key] = cell;
     });
     rawRows.push(snapshot);
   }
@@ -539,7 +546,9 @@ export function mapKreditRecords(
       dpd: Math.max(0, Math.round(toNumber(row.dpd))),
       is_restruktur: toBoolean(row.is_restruktur),
       tanggal_booking: isBooking ? tanggalBooking : null,
-      raw: rawRows[index] ?? {},
+      // Dibersihkan di sini, bukan hanya di `readWorkbook`, supaya pemanggil
+      // yang menyuplai snapshot dari sumber lain tetap aman.
+      raw: sanitizeDeep(rawRows[index] ?? {}),
     });
   });
 

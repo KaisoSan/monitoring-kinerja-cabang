@@ -19,7 +19,8 @@ gaya visual **neumorphism** dengan palet BNI (teal, oranye, abu-abu terang).
 5. [Struktur Proyek](#struktur-proyek)
 6. [Rumus Metrik](#rumus-metrik)
 7. [Perintah yang Tersedia](#perintah-yang-tersedia)
-8. [Catatan Keamanan](#catatan-keamanan)
+8. [Pemecahan Masalah](#pemecahan-masalah)
+9. [Catatan Keamanan](#catatan-keamanan)
 
 ---
 
@@ -88,6 +89,8 @@ file `.xlsx` / `.xls` / `.xlsm` / `.csv` yang:
 - membersihkan nama kolom menjadi `snake_case` dan memetakan alias umum
   (`Nama RM` → `pengelola`, `Outstanding (Rp)` → `baki_debet`, dst.),
 - memahami format angka Indonesia (`Rp 1.234.567,89`) maupun Inggris,
+- membersihkan karakter yang ditolak PostgreSQL (lihat
+  [Pemecahan Masalah](#pemecahan-masalah)),
 - menampilkan pratinjau pemetaan kolom serta daftar baris yang dilewati,
 - mengirim data ke Supabase secara **batch** dengan `upsert`, dan
 - memberi notifikasi toast untuk status loading, sukses, dan error.
@@ -251,6 +254,7 @@ src/
 │   ├── columns.ts               Definisi 86 kolom + kolom default
 │   ├── excel.ts                 Pembersih header + parser workbook
 │   ├── navigation.ts            Penyaring redirect `next` (anti open redirect)
+│   ├── sanitize.ts              Pembersih karakter yang ditolak PostgreSQL
 │   ├── metrics.ts               Seluruh agregasi & rumus pilar
 │   ├── data.ts                  Pemuat data Supabase + fallback contoh
 │   ├── sample-data.ts           Dataset contoh deterministik
@@ -299,6 +303,31 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 | `npm run lint` | ESLint |
 | `npm test` | Uji parser Excel & pembacaan workbook |
 | `npm run template` | Membuat file Excel contoh di `contoh/` |
+
+---
+
+## Pemecahan Masalah
+
+### `unsupported Unicode escape sequence` saat mengunggah
+
+Galat ini datang dari PostgreSQL, bukan dari aplikasi. Ekstrak dari sistem inti
+kerap menyisakan byte yang tidak terlihat di Excel:
+
+| Karakter | Akibat |
+|---|---|
+| **NUL (`U+0000`)** | Ditolak pada tipe `text` **dan** `jsonb`. Inilah penyebab galat di atas. |
+| **Surrogate yatim** | Separuh pasangan UTF-16 tanpa pasangannya; ditolak dengan galat serupa. |
+| **Kontrol C0 lain** | Diterima PostgreSQL, tetapi merusak tampilan tabel dan hasil ekspor. |
+
+Sejak versi ini karakter tersebut dibersihkan otomatis oleh
+[`src/lib/sanitize.ts`](src/lib/sanitize.ts) di dua titik: saat parsing di
+browser, dan sekali lagi di server sebelum `upsert`. Bila ada karakter yang
+dibuang, jumlahnya dilaporkan pada notifikasi keberhasilan unggah — pembersihan
+tidak pernah terjadi diam-diam.
+
+Tab, newline, dan carriage return sengaja dipertahankan. `U+FFFD` (tanda tanya
+dalam wajik) juga tidak dibuang: karakter itu sah disimpan dan justru menjadi
+penanda bahwa ada kerusakan encoding di sistem hulu.
 
 ---
 

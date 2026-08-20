@@ -142,6 +142,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
     }
 
     let processed = 0;
+    let sanitized = 0;
     try {
       for (let index = 0; index < chunks.length; index += 1) {
         const response = await fetch("/api/upload", {
@@ -154,10 +155,15 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
           }),
         });
 
-        const payload = (await response.json()) as { processed?: number; error?: string };
+        const payload = (await response.json()) as {
+          processed?: number;
+          sanitized?: number;
+          error?: string;
+        };
         if (!response.ok) throw new Error(payload.error ?? "Unggahan ditolak server.");
 
         processed += payload.processed ?? chunks[index].length;
+        sanitized += payload.sanitized ?? 0;
         setProgress(((index + 1) / chunks.length) * 100);
         toast.loading(
           `Mengunggah ${formatNumber(processed)} dari ${formatNumber(parsed.rows.length)} baris...`,
@@ -165,7 +171,16 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
         );
       }
 
-      toast.success(`Berhasil menyimpan ${formatNumber(processed)} baris.`, { id: toastId });
+      // Pembersihan karakter tidak boleh terjadi diam-diam: admin perlu tahu
+      // ada isi sel yang berubah sebelum tersimpan.
+      toast.success(
+        sanitized > 0
+          ? `Berhasil menyimpan ${formatNumber(processed)} baris. ${formatNumber(
+              sanitized,
+            )} karakter tidak valid dibersihkan.`
+          : `Berhasil menyimpan ${formatNumber(processed)} baris.`,
+        { id: toastId, duration: sanitized > 0 ? 8000 : 4000 },
+      );
       setParsed(null);
       setLastFile(null);
       if (inputRef.current) inputRef.current.value = "";

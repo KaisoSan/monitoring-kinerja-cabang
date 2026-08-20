@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isAdminEmail, isSupabaseConfigured } from "@/lib/supabase/config";
+import { sanitizeDeep, sanitizeText, type SanitizeStats } from "@/lib/sanitize";
 import {
   PIPELINE_DROPPED,
   PIPELINE_STAGES,
@@ -72,11 +73,15 @@ export async function POST(request: Request) {
   const sanitize =
     dataset === "kredit_records" ? sanitizeKreditRecord : sanitizeTargetCabang;
 
+  // Lapis terakhir sebelum menyentuh database: apa pun yang lolos dari
+  // pemetaan di atas tetap disapu ulang secara rekursif, sehingga tidak ada
+  // NUL atau surrogate yatim yang sampai ke PostgreSQL.
+  const stats: SanitizeStats = { removed: 0 };
   const rows: Json[] = [];
   for (const row of rawRows) {
     if (!row || typeof row !== "object") continue;
     const clean = sanitize(row as Json);
-    if (clean) rows.push(clean);
+    if (clean) rows.push(sanitizeDeep(clean, stats));
   }
 
   if (rows.length === 0) {
@@ -129,6 +134,8 @@ export async function POST(request: Request) {
     processed,
     batches: totalBatches,
     skipped: rawRows.length - rows.length,
+    /** Jumlah karakter tidak valid yang dibuang sebelum penyimpanan. */
+    sanitized: stats.removed,
   });
 }
 
@@ -140,7 +147,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function text(value: unknown, fallback: string, maxLength = 200): string {
   if (typeof value !== "string") return fallback;
-  const trimmed = value.trim().slice(0, maxLength);
+  const trimmed = sanitizeText(value).trim().slice(0, maxLength);
   return trimmed || fallback;
 }
 
@@ -193,13 +200,21 @@ function sanitizeRaw(value: unknown): Json {
 
   const result: Json = {};
   let count = 0;
-  for (const [key, cell] of Object.entries(value as Json)) {
+  for (const [rawKey, cell] of Object.entries(value as Json)) {
     if (count >= MAX_RAW_KEYS) break;
     if (cell === null || cell === undefined || cell === "") continue;
 
+    const key = sanitizeText(rawKey);
+    // `__proto__` pada objek biasa mengubah prototipe, bukan menambah properti.
+    if (!key || key === "__proto__") continue;
+
     if (typeof cell === "number" && Number.isFinite(cell)) result[key] = cell;
     else if (typeof cell === "boolean") result[key] = cell;
-    else if (typeof cell === "string") result[key] = cell.slice(0, MAX_RAW_VALUE_LENGTH);
+    else if (typeof cell === "string") {
+      const clean = sanitizeText(cell).slice(0, MAX_RAW_VALUE_LENGTH);
+      if (!clean) continue;
+      result[key] = clean;
+    }
     else continue;
 
     count += 1;
