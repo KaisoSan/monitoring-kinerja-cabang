@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { LayoutDashboard, Settings2 } from "lucide-react";
 import { LogoutButton } from "@/components/admin/LogoutButton";
+import { PeriodeSelector } from "./PeriodeSelector";
 import { formatPeriode } from "@/lib/format";
 
 export function DashboardHeader({
   periode,
+  periodeTersedia,
   totalRows,
   userEmail,
 }: {
   periode: string | null;
+  /** Seluruh periode yang ada di database, terbaru lebih dulu. */
+  periodeTersedia: string[];
   totalRows: number;
   /** Email sesi aktif; kosong bila belum login. */
   userEmail: string | null;
@@ -34,7 +38,8 @@ export function DashboardHeader({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <PeriodeSelector periode={periode} tersedia={periodeTersedia} />
           <Link
             href="/admin"
             className="neu-press text-ink-700 flex items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold"

@@ -176,7 +176,10 @@ export const UPLOAD_DATASET_HINTS: Record<UploadDataset, string> = {
 
 /** Kolom kunci `on conflict` untuk masing-masing dataset. */
 export const UPLOAD_CONFLICT_KEYS: Record<UploadDataset, string> = {
-  kredit_records: "kode_fasilitas",
+  // Gabungan, bukan kode_fasilitas saja: satu fasilitas muncul kembali tiap
+  // periode, dan kunci tunggal membuat unggahan bulan baru menimpa bulan
+  // sebelumnya. Harus sejalan dengan constraint kredit_records_periode_unik.
+  kredit_records: "kode_fasilitas,periode",
   target_cabang: "periode,cabang,produk",
   dpk_looser: "periode,outlet,cif",
   akun_records: "periode,sumber,kode_akun",

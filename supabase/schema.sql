@@ -9,7 +9,7 @@
 -- -------------------------------------------------------------
 create table if not exists public.kredit_records (
   id                uuid primary key default gen_random_uuid(),
-  kode_fasilitas    text not null unique,
+  kode_fasilitas    text not null,
   periode           date not null,
   area_head         text not null,
   cabang            text not null,
@@ -31,7 +31,11 @@ create table if not exists public.kredit_records (
   -- tanpa perlu menambah kolom baru di tabel ini.
   raw               jsonb not null default '{}'::jsonb,
   created_at        timestamptz not null default now(),
-  updated_at        timestamptz not null default now()
+  updated_at        timestamptz not null default now(),
+  -- Kunci gabungan, BUKAN `kode_fasilitas` saja: satu fasilitas muncul
+  -- kembali setiap periode, dan kunci tunggal membuat unggahan bulan baru
+  -- menimpa bulan sebelumnya.
+  constraint kredit_records_periode_unik unique (kode_fasilitas, periode)
 );
 
 create index if not exists kredit_records_periode_idx    on public.kredit_records (periode desc);
@@ -388,3 +392,74 @@ create policy "target_logs baca user login"
 -- Seperti tabel lain: tidak ada kebijakan tulis sama sekali, sehingga
 -- seluruh penyimpanan target hanya mungkin lewat service role pada
 -- route /api/target yang sudah memeriksa allowlist ADMIN_EMAILS.
+
+
+-- =============================================================
+-- BAGIAN 4 - Migrasi ke data historis (time-series)
+--
+-- Semula `kredit_records.kode_fasilitas` bersifat unik tunggal, sehingga
+-- mengunggah bulan baru MENIMPA baris bulan sebelumnya. Bagian ini
+-- menggantinya dengan kunci gabungan (kode_fasilitas, periode) supaya tiap
+-- periode berdiri sendiri.
+--
+-- Aman dijalankan berulang, dan aman pada tabel yang sudah berisi data:
+-- karena kunci lama menjamin kode_fasilitas unik, tidak mungkin ada
+-- pasangan (kode_fasilitas, periode) yang kembar saat kunci baru dipasang.
+--
+-- CATATAN PENTING: migrasi ini TIDAK mengembalikan data bulan lama yang
+-- terlanjur tertimpa sebelum perubahan ini. Baris tersebut sudah hilang
+-- dari database dan harus diunggah ulang dari berkasnya.
+--
+-- Tiga tabel lain (target_cabang, dpk_looser, akun_records) sudah memuat
+-- `periode` pada kunci uniknya sejak awal, jadi tidak perlu diubah.
+-- =============================================================
+
+do $$
+begin
+  -- 1. Lepas kunci unik tunggal bawaan PostgreSQL bila masih ada.
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.kredit_records'::regclass
+      and conname = 'kredit_records_kode_fasilitas_key'
+  ) then
+    alter table public.kredit_records
+      drop constraint kredit_records_kode_fasilitas_key;
+    raise notice 'Kunci unik tunggal kode_fasilitas dilepas.';
+  end if;
+
+  -- 2. Pasang kunci gabungan bila belum ada.
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.kredit_records'::regclass
+      and conname = 'kredit_records_periode_unik'
+  ) then
+    alter table public.kredit_records
+      add constraint kredit_records_periode_unik unique (kode_fasilitas, periode);
+    raise notice 'Kunci gabungan (kode_fasilitas, periode) dipasang.';
+  end if;
+end
+$$;
+
+-- Tidak perlu index terpisah untuk kode_fasilitas: index milik kunci
+-- gabungan sudah diawali kolom tersebut, sehingga penelusuran riwayat satu
+-- fasilitas antar periode tetap terlayani.
+
+-- -------------------------------------------------------------
+-- 13. Daftar periode yang tersedia
+--     Mengisi dropdown periode di header dashboard. PostgREST tidak punya
+--     SELECT DISTINCT, dan menarik seluruh baris hanya untuk menyusun
+--     daftar bulan jelas berlebihan.
+-- -------------------------------------------------------------
+drop view if exists public.kredit_periode;
+create view public.kredit_periode
+  with (security_invoker = on) as
+select
+  periode,
+  count(*)::bigint as jumlah_baris
+from public.kredit_records
+group by periode;
+
+-- Pemeriksaan setelah migrasi:
+--   select conname, pg_get_constraintdef(oid)
+--   from pg_constraint where conrelid = 'public.kredit_records'::regclass;
+--   select * from public.kredit_periode order by periode desc;

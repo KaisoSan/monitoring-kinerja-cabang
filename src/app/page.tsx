@@ -13,14 +13,21 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ periode?: string }>;
+}) {
+  const { periode: periodeDipilih } = await searchParams;
+
   // Ketiga dataset berdiri sendiri: kegagalan salah satunya tidak boleh
   // menjatuhkan seluruh halaman, jadi masing-masing membawa statusnya sendiri.
-  const [{ records, targets, periode, state, message }, dpk, akun] = await Promise.all([
-    loadDashboardData(),
-    loadDpkData(),
-    loadAkunData(),
-  ]);
+  const [{ records, targets, periode, periodeTersedia, state, message }, dpk, akun] =
+    await Promise.all([
+      loadDashboardData(periodeDipilih),
+      loadDpkData(),
+      loadAkunData(),
+    ]);
 
   const supabase = await createServerSupabase();
   const { data } = (await supabase?.auth.getUser()) ?? { data: { user: null } };
@@ -29,6 +36,7 @@ export default async function DashboardPage() {
     <main className="mx-auto min-h-screen w-full max-w-[104rem] px-4 py-6 sm:px-6 lg:px-8">
       <DashboardHeader
         periode={periode}
+        periodeTersedia={periodeTersedia}
         totalRows={records.length}
         userEmail={data?.user?.email ?? null}
       />
@@ -36,7 +44,7 @@ export default async function DashboardPage() {
       {records.length === 0 ? (
         <DashboardStatus state={state} message={message} />
       ) : (
-        <DashboardShell records={records} targets={targets} />
+        <DashboardShell records={records} targets={targets} periode={periode} />
       )}
 
       <section id="seksi-dpk" className="mt-5 scroll-mt-44">

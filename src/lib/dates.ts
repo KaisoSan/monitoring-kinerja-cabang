@@ -77,3 +77,22 @@ export function toFirstOfMonth(iso: string): string | null {
   if (!isValidIsoDate(iso)) return null;
   return `${iso.slice(0, 7)}-01`;
 }
+
+/**
+ * Memilih periode yang akan ditampilkan dashboard.
+ *
+ * Pilihan pengguna dipakai hanya bila periodenya benar-benar ada datanya.
+ * Kalau tidak, dashboard jatuh ke periode terbaru — tautan lama yang menunjuk
+ * bulan yang sudah dihapus sebaiknya menampilkan data terbaru daripada layar
+ * kosong tanpa penjelasan.
+ *
+ * @param diminta Periode dari query string, boleh tidak sah atau kosong.
+ * @param tersedia Daftar periode dari database, terbaru lebih dulu.
+ */
+export function pilihPeriode(
+  diminta: string | null | undefined,
+  tersedia: string[],
+): string | null {
+  if (diminta && isValidIsoDate(diminta) && tersedia.includes(diminta)) return diminta;
+  return tersedia[0] ?? null;
+}

@@ -152,3 +152,34 @@ test("tanggal bermasalah tidak menggagalkan baris lain", () => {
     );
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* Pemilihan periode untuk dashboard historis                          */
+/* ------------------------------------------------------------------ */
+
+test("pilihPeriode memakai pilihan pengguna bila periodenya ada datanya", async () => {
+  const { pilihPeriode } = await import("../src/lib/dates.ts");
+  const tersedia = ["2026-08-01", "2026-07-01", "2026-06-01"];
+
+  assert.equal(pilihPeriode("2026-07-01", tersedia), "2026-07-01");
+  assert.equal(pilihPeriode("2026-06-01", tersedia), "2026-06-01");
+});
+
+test("pilihPeriode jatuh ke periode terbaru saat pilihannya tidak layak", async () => {
+  const { pilihPeriode } = await import("../src/lib/dates.ts");
+  const tersedia = ["2026-08-01", "2026-07-01"];
+
+  // Bulan yang tidak punya data, mis. tautan lama setelah periode dihapus.
+  assert.equal(pilihPeriode("2026-01-01", tersedia), "2026-08-01");
+  // Nilai tidak sah dari query string tidak boleh diteruskan ke database.
+  assert.equal(pilihPeriode("2026-18-01", tersedia), "2026-08-01");
+  assert.equal(pilihPeriode("bukan tanggal", tersedia), "2026-08-01");
+  assert.equal(pilihPeriode(null, tersedia), "2026-08-01");
+  assert.equal(pilihPeriode(undefined, tersedia), "2026-08-01");
+});
+
+test("pilihPeriode mengembalikan null saat belum ada periode sama sekali", async () => {
+  const { pilihPeriode } = await import("../src/lib/dates.ts");
+  assert.equal(pilihPeriode("2026-08-01", []), null);
+  assert.equal(pilihPeriode(null, []), null);
+});

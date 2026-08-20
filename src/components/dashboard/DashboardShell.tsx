@@ -42,9 +42,12 @@ const SECTIONS = [
 export function DashboardShell({
   records,
   targets,
+  periode,
 }: {
   records: KreditRecord[];
   targets: TargetCabang[];
+  /** Periode yang sedang ditampilkan; diteruskan ke Tabel Data Detail. */
+  periode: string | null;
 }) {
   const [slicer, setSlicer] = useState<SlicerState>(EMPTY_SLICER);
 
@@ -121,7 +124,7 @@ export function DashboardShell({
       </section>
 
       <section id="tabel-detail" className="scroll-mt-44">
-        <TabelDataDetail slicer={slicer} />
+        <TabelDataDetail slicer={slicer} periode={periode} />
       </section>
     </div>
   );

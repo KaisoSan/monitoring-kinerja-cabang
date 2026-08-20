@@ -140,6 +140,27 @@ file `.xlsx` / `.xls` / `.xlsm` / `.csv` yang:
 - mengirim data ke Supabase secara **batch** dengan `upsert`, dan
 - memberi notifikasi toast untuk status loading, sukses, dan error.
 
+### Data Historis (Time-Series)
+
+Setiap periode berdiri sendiri. Mengunggah bulan baru **tidak** menimpa bulan
+sebelumnya, sehingga riwayat antar bulan tetap bisa dibuka.
+
+- Kunci unik `kredit_records` adalah gabungan **(kode_fasilitas, periode)**,
+  bukan `kode_fasilitas` saja. Satu fasilitas muncul kembali tiap periode.
+- Header dashboard punya dropdown **Periode Data Kredit**, isinya dibaca dari
+  view `kredit_periode`.
+- Pilihan periode disimpan pada query string (`/?periode=2026-08-01`), bukan
+  state komponen, karena seluruh agregat dihitung di server. Efek sampingnya
+  menguntungkan: tautannya bisa dibagikan dan tombol kembali tetap berfungsi.
+- Periode yang diminta hanya dipakai bila memang ada datanya; kalau tidak,
+  dashboard jatuh ke periode terbaru daripada menampilkan layar kosong.
+- Tabel Data Detail mengikuti periode yang sama dengan pilar di atasnya.
+
+Tiga tabel lain (`target_cabang`, `dpk_looser`, `akun_records`) sudah memuat
+`periode` pada kunci uniknya sejak awal, jadi tidak perlu diubah. Seksi DPK dan
+Data Akun memakai periode terbarunya masing-masing dan tidak mengikuti dropdown
+di header, karena periodenya berasal dari berkas yang berbeda.
+
 ### Sumber data
 Seluruh angka pada dashboard — kartu, grafik, opsi Slicer, dan Tabel Data
 Detail — berasal dari tabel Supabase, tanpa perantara data contoh.
@@ -183,6 +204,8 @@ Buka **SQL Editor** di Supabase Studio, tempel seluruh isi
 - `upload_logs` — jejak aktivitas unggah,
 - `dpk_looser` dan `akun_records` — dua dataset tambahan (Bagian 2),
 - `dimensi_kredit` dan `target_logs` — penopang Manajemen Target (Bagian 3),
+- migrasi kunci gabungan `(kode_fasilitas, periode)` dan view `kredit_periode`
+  untuk data historis (Bagian 4),
 - view agregat `dpk_ringkasan_outlet`, `akun_ringkasan_cabang`, dan
   `akun_sebaran_dpd`, semuanya dengan `security_invoker = on` supaya RLS pada
   tabel sumbernya tetap berlaku,
@@ -361,6 +384,28 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 ---
 
 ## Pemecahan Masalah
+
+### Data bulan lama hilang setelah mengunggah bulan baru
+
+Sebelum Bagian 4 dijalankan, `kredit_records.kode_fasilitas` bersifat unik
+tunggal sehingga unggahan bulan baru menimpa baris bulan sebelumnya.
+
+Jalankan ulang `supabase/schema.sql` untuk memasang kunci gabungan
+`(kode_fasilitas, periode)`. Migrasinya aman dijalankan berulang dan aman pada
+tabel yang sudah berisi data.
+
+**Migrasi tidak mengembalikan baris yang sudah terlanjur tertimpa.** Data bulan
+lama harus diunggah ulang dari berkasnya. Setelah kunci gabungan terpasang,
+unggahan berikutnya tidak akan saling menimpa lagi.
+
+Periksa hasilnya dengan:
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint where conrelid = 'public.kredit_records'::regclass;
+
+select * from public.kredit_periode order by periode desc;
+```
 
 ### Dropdown cabang pada Manajemen Target kosong
 

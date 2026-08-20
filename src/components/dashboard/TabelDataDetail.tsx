@@ -20,7 +20,14 @@ import { SLICER_KEYS, type KreditRecord, type SlicerState } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
-export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
+export function TabelDataDetail({
+  slicer,
+  periode,
+}: {
+  slicer: SlicerState;
+  /** Periode dari header; tabel harus menampilkan bulan yang sama. */
+  periode: string | null;
+}) {
   // Hanya kolom esensial yang tampil saat dashboard pertama kali dibuka.
   const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
   const [page, setPage] = useState(0);
@@ -36,7 +43,7 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
     return DETAIL_COLUMNS.filter((column) => visible.has(column.label));
   }, [visibleColumns]);
 
-  const slicerKey = SLICER_KEYS.map((key) => slicer[key] ?? "").join("|");
+  const slicerKey = `${periode ?? ""}|${SLICER_KEYS.map((key) => slicer[key] ?? "").join("|")}`;
 
   // Kembali ke halaman pertama setiap kali slicer berubah. Penyesuaian
   // dilakukan saat render (bukan di effect) agar tidak memicu render berantai.
@@ -57,6 +64,7 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
           page: String(page),
           pageSize: String(PAGE_SIZE),
         });
+        if (periode) params.set("periode", periode);
         for (const key of SLICER_KEYS) {
           const value = slicer[key];
           if (value) params.set(key, value);
@@ -98,7 +106,7 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
 
     void load();
     return () => controller.abort();
-  }, [page, slicer, slicerKey]);
+  }, [page, slicer, slicerKey, periode]);
 
   const toggleColumn = useCallback((label: string) => {
     setVisibleColumns((current) =>

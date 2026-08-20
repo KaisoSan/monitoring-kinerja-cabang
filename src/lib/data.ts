@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerSupabase } from "./supabase/server";
 import { isSupabaseConfigured } from "./supabase/config";
+import { pilihPeriode } from "./dates";
 import type { KreditRecord, SlicerState, TargetCabang } from "./types";
 
 /**
@@ -25,8 +26,10 @@ export type DashboardState =
 export type DashboardData = {
   records: KreditRecord[];
   targets: TargetCabang[];
-  /** Periode terakhir yang tersedia, format `YYYY-MM-DD`. */
+  /** Periode yang sedang ditampilkan, format `YYYY-MM-DD`. */
   periode: string | null;
+  /** Seluruh periode yang ada di database, terbaru lebih dulu. */
+  periodeTersedia: string[];
   state: DashboardState;
   /** Penjelasan yang ditampilkan ke pengguna saat `state` bukan `ok`. */
   message: string | null;
@@ -56,14 +59,34 @@ const NO_SESSION =
   "pembacaan untuk pengguna yang sudah login, jadi silakan masuk kembali.";
 
 function emptyResult(state: DashboardState, message: string | null): DashboardData {
-  return { records: [], targets: [], periode: null, state, message };
+  return { records: [], targets: [], periode: null, periodeTersedia: [], state, message };
+}
+
+/**
+ * Daftar periode yang tersedia, terbaru lebih dulu.
+ *
+ * Dibaca dari view `kredit_periode` supaya PostgreSQL yang mengelompokkan;
+ * menarik seluruh baris hanya untuk menyusun daftar bulan jelas berlebihan.
+ */
+async function bacaPeriodeTersedia(
+  supabase: NonNullable<Awaited<ReturnType<typeof createServerSupabase>>>,
+): Promise<{ list: string[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from("kredit_periode")
+    .select("periode")
+    .order("periode", { ascending: false });
+
+  if (error) return { list: [], error: error.message };
+
+  const rows = (data ?? []) as unknown as RawRecord[];
+  return { list: rows.map((row) => str(row.periode)).filter(Boolean), error: null };
 }
 
 /**
  * Memuat data periode terakhir dari Supabase. Tidak pernah mengarang data:
  * bila gagal, `records` kosong dan alasannya dibawa di `message`.
  */
-export async function loadDashboardData(): Promise<DashboardData> {
+export async function loadDashboardData(periodeDiminta?: string): Promise<DashboardData> {
   if (!isSupabaseConfigured) return emptyResult("belum-dikonfigurasi", NOT_CONFIGURED);
 
   const supabase = await createServerSupabase();
@@ -72,24 +95,28 @@ export async function loadDashboardData(): Promise<DashboardData> {
   const { data: session } = await supabase.auth.getUser();
   if (!session?.user) return emptyResult("tanpa-sesi", NO_SESSION);
 
-  const latest = await supabase
-    .from("kredit_records")
-    .select("periode")
-    .order("periode", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latest.error) {
+  const tersedia = await bacaPeriodeTersedia(supabase);
+  if (tersedia.error) {
     return emptyResult(
       "galat",
-      `Gagal membaca tabel kredit_records: ${latest.error.message}. ` +
+      `Gagal membaca daftar periode: ${tersedia.error}. ` +
         "Pastikan supabase/schema.sql sudah dijalankan pada project ini.",
     );
   }
 
-  const periode = latest.data?.periode ?? null;
+  const periode = pilihPeriode(periodeDiminta, tersedia.list);
+
   // Tabel kosong bukan kegagalan; dashboard menampilkan keadaan kosong apa adanya.
-  if (!periode) return { records: [], targets: [], periode: null, state: "ok", message: null };
+  if (!periode) {
+    return {
+      records: [],
+      targets: [],
+      periode: null,
+      periodeTersedia: tersedia.list,
+      state: "ok",
+      message: null,
+    };
+  }
 
   const records: KreditRecord[] = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -124,6 +151,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
     records,
     targets: targetRows.map(normalizeTarget),
     periode,
+    periodeTersedia: tersedia.list,
     state: "ok",
     message: null,
   };
@@ -181,6 +209,8 @@ export type DetailQuery = {
   slicer: SlicerState;
   page: number;
   pageSize: number;
+  /** Periode yang sedang dipilih di header; kosong berarti periode terbaru. */
+  periode?: string;
 };
 
 export type DetailPage = {
@@ -200,6 +230,7 @@ export async function loadDetailRecords({
   slicer,
   page,
   pageSize,
+  periode: periodeDiminta,
 }: DetailQuery): Promise<DetailPage> {
   const empty = (state: DashboardState, message: string | null): DetailPage => ({
     rows: [],
@@ -221,18 +252,15 @@ export async function loadDetailRecords({
   const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
   const from = safePage * safeSize;
 
-  const latest = await supabase
-    .from("kredit_records")
-    .select("periode")
-    .order("periode", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latest.error) {
-    return empty("galat", `Gagal membaca periode terakhir: ${latest.error.message}`);
+  // Tabel detail harus menampilkan periode yang sama dengan pilar di atasnya,
+  // jadi periodenya ikut dikirim dari header, bukan selalu yang terbaru.
+  const tersedia = await bacaPeriodeTersedia(supabase);
+  if (tersedia.error) {
+    return empty("galat", `Gagal membaca daftar periode: ${tersedia.error}`);
   }
 
-  const periode = latest.data?.periode ?? null;
+  const periode = pilihPeriode(periodeDiminta, tersedia.list);
+
   if (!periode) return { rows: [], total: 0, periode: null, state: "ok", message: null };
 
   let query = supabase

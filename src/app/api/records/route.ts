@@ -47,6 +47,7 @@ export async function GET(request: Request) {
 
   const result = await loadDetailRecords({
     slicer,
+    periode: params.get("periode") ?? undefined,
     page: Number.isFinite(page) ? page : 0,
     pageSize: Number.isFinite(pageSize)
       ? Math.min(pageSize, MAX_PAGE_SIZE)
