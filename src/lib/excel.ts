@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 
 import { sanitizeDeep, sanitizeText } from "./sanitize";
+import { expandYear, toFirstOfMonth, toIsoFromParts } from "./dates";
 import {
   PIPELINE_DROPPED,
   PIPELINE_STAGES,
@@ -258,16 +259,48 @@ export function toText(value: unknown, fallback = ""): string {
   return text || fallback;
 }
 
-const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})/;
-const DMY = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/;
 const MONTH_NAMES: Record<string, number> = {
-  jan: 1, januari: 1, february: 2, feb: 2, februari: 2, mar: 3, maret: 3,
-  apr: 4, april: 4, mei: 5, may: 5, jun: 6, juni: 6, jul: 7, juli: 7,
-  agu: 8, agt: 8, aug: 8, agustus: 8, sep: 9, sept: 9, september: 9,
-  okt: 10, oct: 10, oktober: 10, nov: 11, november: 11, des: 12, dec: 12, desember: 12,
+  jan: 1, januari: 1, january: 1, feb: 2, februari: 2, february: 2,
+  mar: 3, maret: 3, march: 3, apr: 4, april: 4, mei: 5, may: 5,
+  jun: 6, juni: 6, june: 6, jul: 7, juli: 7, july: 7,
+  agu: 8, agt: 8, ags: 8, aug: 8, agustus: 8, august: 8,
+  sep: 9, sept: 9, september: 9, okt: 10, oct: 10, oktober: 10, october: 10,
+  nov: 11, november: 11, des: 12, dec: 12, desember: 12, december: 12,
 };
 
-/** Mengubah nilai sel menjadi tanggal ISO `YYYY-MM-DD`, atau `null`. */
+/** Tiga angka dipisah `/`, `-`, atau `.` — mis. `18/06/2026`, `2026-06-18`. */
+const NUMERIC_DATE = /^(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})$/;
+/** `18 Juni 2026`, `18-Jun-26`. */
+const NAMED_DMY = /^(\d{1,2})[\s\-./]+([a-zA-Z]+)[\s\-./]+(\d{2,4})$/;
+/** `Jun 18, 2026`, `June 18 2026`. */
+const NAMED_MDY = /^([a-zA-Z]+)[\s\-./]+(\d{1,2}),?[\s\-./]+(\d{2,4})$/;
+/** `Agustus 2026`, `Agu-26`. */
+const NAMED_MY = /^([a-zA-Z]+)[\s\-./]+(\d{2,4})$/;
+/** Bagian jam pada `18/06/2026 00:00:00` atau `2026-06-18T00:00:00`. */
+const TIME_SUFFIX = /[\sT]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*([AP]M)?$/i;
+
+/**
+ * Menentukan mana hari dan mana bulan pada tanggal numerik dua komponen.
+ *
+ * Ekstrak dari sistem inti bisa berisi campuran `DD/MM/YYYY` (konvensi
+ * Indonesia) dan `MM/DD/YYYY` (yang ditulis Excel saat locale-nya berbeda),
+ * sehingga urutannya tidak boleh diasumsikan begitu saja:
+ *
+ * - salah satu komponen > 12 -> urutannya pasti, tidak ada tebakan;
+ * - keduanya <= 12 -> benar-benar ambigu, dipilih `DD/MM` mengikuti
+ *   konvensi Indonesia.
+ */
+function resolveDayMonth(first: number, second: number): { day: number; month: number } {
+  if (first > 12 && second <= 12) return { day: first, month: second };
+  if (second > 12 && first <= 12) return { day: second, month: first };
+  return { day: first, month: second };
+}
+
+/**
+ * Mengubah nilai sel menjadi tanggal ISO `YYYY-MM-DD`, atau `null` bila
+ * tidak bisa diurai. Tidak pernah mengembalikan tanggal yang tidak sah —
+ * seluruh jalur bermuara pada `toIsoFromParts` yang memvalidasi kalender.
+ */
 export function toIsoDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
 
@@ -278,52 +311,56 @@ export function toIsoDate(value: unknown): string | null {
   // Serial number Excel (hari sejak 1899-12-30).
   if (typeof value === "number" && Number.isFinite(value)) {
     const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) return toIsoFromParts(parsed.y, parsed.m, parsed.d);
-    return null;
+    return parsed ? toIsoFromParts(parsed.y, parsed.m, parsed.d) : null;
   }
 
-  const text = String(value).trim();
+  const text = sanitizeText(String(value)).trim().replace(TIME_SUFFIX, "").trim();
   if (!text) return null;
 
-  const iso = DATE_ONLY.exec(text);
-  if (iso) return toIsoFromParts(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const numeric = NUMERIC_DATE.exec(text);
+  if (numeric) {
+    const [, firstRaw, secondRaw, thirdRaw] = numeric;
 
-  const dmy = DMY.exec(text);
-  if (dmy) return toIsoFromParts(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]));
-
-  // "Agustus 2026" / "Agu-26"
-  const named = /^([a-zA-Z]+)[\s-]+(\d{2,4})$/.exec(text);
-  if (named) {
-    const month = MONTH_NAMES[named[1].toLowerCase()];
-    if (month) {
-      const rawYear = Number(named[2]);
-      const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-      return toIsoFromParts(year, month, 1);
+    // Komponen pertama empat digit berarti urutannya sudah YYYY-MM-DD.
+    if (firstRaw.length === 4) {
+      return toIsoFromParts(Number(firstRaw), Number(secondRaw), Number(thirdRaw));
     }
+
+    const { day, month } = resolveDayMonth(Number(firstRaw), Number(secondRaw));
+    return toIsoFromParts(expandYear(Number(thirdRaw)), month, day);
   }
 
-  const fallback = new Date(text);
-  if (!Number.isNaN(fallback.getTime())) {
-    return toIsoFromParts(
-      fallback.getFullYear(),
-      fallback.getMonth() + 1,
-      fallback.getDate(),
-    );
+  const namedDmy = NAMED_DMY.exec(text);
+  if (namedDmy) {
+    const month = MONTH_NAMES[namedDmy[2].toLowerCase()];
+    if (!month) return null;
+    return toIsoFromParts(expandYear(Number(namedDmy[3])), month, Number(namedDmy[1]));
   }
+
+  const namedMdy = NAMED_MDY.exec(text);
+  if (namedMdy) {
+    const month = MONTH_NAMES[namedMdy[1].toLowerCase()];
+    if (!month) return null;
+    return toIsoFromParts(expandYear(Number(namedMdy[3])), month, Number(namedMdy[2]));
+  }
+
+  const namedMy = NAMED_MY.exec(text);
+  if (namedMy) {
+    const month = MONTH_NAMES[namedMy[1].toLowerCase()];
+    if (!month) return null;
+    return toIsoFromParts(expandYear(Number(namedMy[2])), month, 1);
+  }
+
+  // Sengaja TIDAK ada cadangan `new Date(text)`. Penguraiannya bergantung
+  // mesin dan menghasilkan kejutan: `new Date("0")` di V8 menjadi tahun 2000,
+  // sehingga sel berisi angka acak berubah menjadi tanggal yang seolah sah.
   return null;
-}
-
-function toIsoFromParts(year: number, month: number, day: number): string | null {
-  if (!year || !month || !day) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${year}-${pad(month)}-${pad(day)}`;
 }
 
 /** Menormalkan tanggal apa pun ke tanggal 1 di bulan tersebut. */
 export function toPeriode(value: unknown): string | null {
   const iso = toIsoDate(value);
-  if (!iso) return null;
-  return `${iso.slice(0, 7)}-01`;
+  return iso ? toFirstOfMonth(iso) : null;
 }
 
 const STATUS_ALIASES: Record<string, StatusPipeline> = {
@@ -529,9 +566,27 @@ export function mapKreditRecords(
     }
     seenKeys.add(kode);
 
+    // Tanggal yang tidak bisa diurai tidak boleh menggagalkan seluruh batch:
+    // periode jatuh ke periode default, tanggal booking menjadi null, dan
+    // keduanya dicatat supaya perubahannya tidak terjadi diam-diam.
+    const periodeText = toText(row.periode);
+    const periode = toPeriode(row.periode);
+    if (periodeText && !periode) {
+      issues.push({
+        row: rowNumber,
+        message: `Periode "${periodeText}" tidak dikenali, dipakai ${periodeDefault}.`,
+      });
+    }
+    if (isBooking && toText(row.tanggal_booking) && !tanggalBooking) {
+      issues.push({
+        row: rowNumber,
+        message: `Tanggal booking "${toText(row.tanggal_booking)}" tidak dikenali, disimpan kosong.`,
+      });
+    }
+
     mapped.push({
       kode_fasilitas: kode,
-      periode: toPeriode(row.periode) ?? periodeDefault,
+      periode: periode ?? periodeDefault,
       area_head: toText(row.area_head, "Tanpa Area Head"),
       cabang,
       produk: toText(row.produk, "Lainnya").toUpperCase(),
@@ -575,7 +630,15 @@ export function mapTargetCabang(rows: RawRow[], defaultPeriode?: string) {
       return;
     }
 
-    const periode = toPeriode(row.periode) ?? periodeDefault;
+    const periodeText = toText(row.periode);
+    const parsedPeriode = toPeriode(row.periode);
+    if (periodeText && !parsedPeriode) {
+      issues.push({
+        row: rowNumber,
+        message: `Periode "${periodeText}" tidak dikenali, dipakai ${periodeDefault}.`,
+      });
+    }
+    const periode = parsedPeriode ?? periodeDefault;
     const produk = toText(row.produk, "SEMUA").toUpperCase();
     const key = `${periode}|${cabang}|${produk}`;
     if (seenKeys.has(key)) {

@@ -326,7 +326,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
               {formatNumber(parsed.rows.length)} baris valid
             </Badge>
             {parsed.issues.length > 0 ? (
-              <Badge tone="warn">{formatNumber(parsed.issues.length)} baris dilewati</Badge>
+              <Badge tone="warn">{formatNumber(parsed.issues.length)} catatan</Badge>
             ) : null}
 
             <button
@@ -459,7 +459,7 @@ function IssueList({ issues }: { issues: ParseIssue[] }) {
   return (
     <div>
       <p className="text-ink-500 mb-2 text-[0.7rem] font-bold tracking-wider uppercase">
-        Baris Dilewati
+        Catatan Pemeriksaan
       </p>
       <div className="neu-inset neu-scroll max-h-40 overflow-auto rounded-2xl p-3">
         <ul className="text-ink-700 space-y-1.5 text-xs">

@@ -252,6 +252,7 @@ src/
 │   └── ui/                      Primitif neumorphism
 ├── lib/
 │   ├── columns.ts               Definisi 86 kolom + kolom default
+│   ├── dates.ts                 Pembentuk & pemvalidasi tanggal ISO
 │   ├── excel.ts                 Pembersih header + parser workbook
 │   ├── navigation.ts            Penyaring redirect `next` (anti open redirect)
 │   ├── sanitize.ts              Pembersih karakter yang ditolak PostgreSQL
@@ -328,6 +329,31 @@ tidak pernah terjadi diam-diam.
 Tab, newline, dan carriage return sengaja dipertahankan. `U+FFFD` (tanda tanya
 dalam wajik) juga tidak dibuang: karakter itu sah disimpan dan justru menjadi
 penanda bahwa ada kerusakan encoding di sistem hulu.
+
+### `date/time field value out of range` saat mengunggah
+
+Kolom tanggal pada ekstrak sistem inti kerap bercampur format. Parser kini
+mengenali semuanya dan **tidak pernah** menghasilkan tanggal yang tidak ada di
+kalender:
+
+| Bentuk di Excel | Hasil |
+|---|---|
+| `18/06/2026`, `18-06-2026`, `18.06.2026` | `2026-06-18` |
+| `01/18/2026` (urutan bulan-hari) | `2026-01-18` |
+| `18/06/26` (tahun dua digit) | `2026-06-18` |
+| `18/06/2026 00:00:00`, `2026-06-18T00:00:00` | `2026-06-18` |
+| `18 Juni 2026`, `18-Jun-2026`, `Jun 18, 2026` | `2026-06-18` |
+| Serial Excel, objek `Date` | sesuai nilainya |
+| `31/02/2026`, `bukan tanggal` | `null` |
+
+Urutan hari dan bulan ditentukan per nilai: bila salah satu komponen lebih
+dari 12, urutannya pasti dan tidak ditebak. Bila **keduanya** 12 ke bawah
+(mis. `06/07/2026`) nilainya benar-benar ambigu, dan sistem memilih `DD/MM`
+mengikuti konvensi Indonesia — pastikan file sumber konsisten.
+
+Tanggal yang tidak bisa diurai **tidak menggagalkan batch**: kolom periode
+mundur ke Periode Default, tanggal booking menjadi kosong, dan keduanya
+muncul pada daftar **Catatan Pemeriksaan** di halaman unggah.
 
 ---
 

@@ -3,6 +3,7 @@ import { createAdminSupabase } from "@/lib/supabase/admin";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { isAdminEmail, isSupabaseConfigured } from "@/lib/supabase/config";
 import { sanitizeDeep, sanitizeText, type SanitizeStats } from "@/lib/sanitize";
+import { isValidIsoDate } from "@/lib/dates";
 import {
   PIPELINE_DROPPED,
   PIPELINE_STAGES,
@@ -143,8 +144,6 @@ export async function POST(request: Request) {
 /* Sanitasi baris                                                      */
 /* ------------------------------------------------------------------ */
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 function text(value: unknown, fallback: string, maxLength = 200): string {
   if (typeof value !== "string") return fallback;
   const trimmed = sanitizeText(value).trim().slice(0, maxLength);
@@ -156,8 +155,13 @@ function numeric(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * Memeriksa bentuk SEKALIGUS keabsahan kalender. Memeriksa bentuk saja tidak
+ * cukup: `2026-18-01` lolos pola `\d{4}-\d{2}-\d{2}` tetapi ditolak
+ * PostgreSQL dan menggagalkan seluruh batch.
+ */
 function isoDate(value: unknown): string | null {
-  return typeof value === "string" && ISO_DATE.test(value) ? value : null;
+  return isValidIsoDate(value) ? value : null;
 }
 
 function sanitizeKreditRecord(row: Json): Json | null {
