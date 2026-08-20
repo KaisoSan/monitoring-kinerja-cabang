@@ -334,3 +334,57 @@ create policy "akun_records baca user login"
 -- ulang satu periode dari nol, hapus dulu periodenya:
 --   delete from public.dpk_looser   where periode = '2026-08-01';
 --   delete from public.akun_records where periode = '2026-06-30' and sumber = 'old';
+
+
+-- =============================================================
+-- BAGIAN 3 - Manajemen Target lewat layar
+-- =============================================================
+
+-- -------------------------------------------------------------
+-- 11. Daftar dimensi untuk isian dropdown
+--     PostgREST tidak menyediakan SELECT DISTINCT, jadi daftar
+--     cabang dan produk disiapkan sebagai view. Tanpa ini, halaman
+--     admin harus menarik puluhan ribu baris hanya untuk menyusun
+--     isi dropdown.
+--
+--     `area_head` ikut dibawa karena kolom itu wajib pada
+--     `target_cabang`, sedangkan form hanya meminta cabang.
+-- -------------------------------------------------------------
+drop view if exists public.dimensi_kredit;
+create view public.dimensi_kredit
+  with (security_invoker = on) as
+select distinct
+  area_head,
+  cabang,
+  produk
+from public.kredit_records;
+
+-- -------------------------------------------------------------
+-- 12. Riwayat perubahan target
+--     Target diubah manual dari layar, jadi perlu jejak siapa yang
+--     mengubah dan menjadi berapa.
+-- -------------------------------------------------------------
+create table if not exists public.target_logs (
+  id                      uuid primary key default gen_random_uuid(),
+  periode                 date not null,
+  cabang                  text not null,
+  produk                  text not null,
+  target_baki_debet       numeric(20, 2) not null default 0,
+  target_booking_nominal  numeric(20, 2) not null default 0,
+  changed_by              text,
+  created_at              timestamptz not null default now()
+);
+
+create index if not exists target_logs_periode_idx on public.target_logs (periode desc, created_at desc);
+
+alter table public.target_logs enable row level security;
+
+drop policy if exists "target_logs baca user login" on public.target_logs;
+create policy "target_logs baca user login"
+  on public.target_logs for select
+  to authenticated
+  using (true);
+
+-- Seperti tabel lain: tidak ada kebijakan tulis sama sekali, sehingga
+-- seluruh penyimpanan target hanya mungkin lewat service role pada
+-- route /api/target yang sudah memeriksa allowlist ADMIN_EMAILS.

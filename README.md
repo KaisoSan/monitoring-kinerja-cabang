@@ -90,6 +90,29 @@ hanya menghasilkan 28.545 kombinasi dari 28.551 baris), sehingga kuncinya
 disusun dari kombinasi paling stabil lalu diberi nomor urut saat tetap kembar.
 Kunci tersebut sama setiap kali berkas yang sama diunggah ulang.
 
+### Manajemen Target
+
+Target cabang tidak harus lewat berkas Excel. Halaman `/admin` punya tab
+**Manajemen Target** untuk mengisinya langsung dari layar:
+
+- **Periode** default bulan berjalan, bisa diganti.
+- **Cabang** dan **Produk** diambil otomatis dari data kredit yang sudah masuk
+  (view `dimensi_kredit`), jadi tidak ada ketikan bebas yang berisiko salah eja.
+- **Area Head** tidak ditanyakan; nilainya diturunkan dari cabang yang dipilih,
+  karena kolom itu wajib pada `target_cabang`.
+- Isian nominal memberi pemisah ribuan sambil mengetik dan menampilkan bentuk
+  ringkasnya (`Rp 5,00 M`), sehingga kelebihan satu nol langsung terlihat.
+- Memilih kombinasi yang sudah punya target akan memuat angkanya, sehingga
+  tombol simpan sekaligus berfungsi sebagai "ubah".
+
+Penyimpanan memakai **upsert** pada kunci `periode + cabang + produk` — kunci
+yang sama dipakai berkas Excel target, sehingga kedua jalur tidak saling
+menggandakan baris. Setiap perubahan dicatat di `target_logs` beserta email
+pengubahnya.
+
+Menyimpan target menuntut email yang terdaftar pada `ADMIN_EMAILS`, sama seperti
+mengunggah berkas.
+
 ### Akses & Peran
 Begitu Supabase dikonfigurasi, **seluruh permukaan yang menyentuh data kredit
 mewajibkan login**: dashboard, `/api/records`, dan halaman admin. Ada dua
@@ -159,6 +182,7 @@ Buka **SQL Editor** di Supabase Studio, tempel seluruh isi
   (kunci unik: `periode, cabang, produk`),
 - `upload_logs` — jejak aktivitas unggah,
 - `dpk_looser` dan `akun_records` — dua dataset tambahan (Bagian 2),
+- `dimensi_kredit` dan `target_logs` — penopang Manajemen Target (Bagian 3),
 - view agregat `dpk_ringkasan_outlet`, `akun_ringkasan_cabang`, dan
   `akun_sebaran_dpd`, semuanya dengan `security_invoker = on` supaya RLS pada
   tabel sumbernya tetap berlaku,
@@ -273,6 +297,7 @@ src/
 │   ├── admin/page.tsx           Halaman admin + riwayat unggahan
 │   ├── admin/login/page.tsx     Login Supabase Auth
 │   ├── api/records/route.ts     Satu halaman data detail (86 kolom)
+│   ├── api/target/route.ts      Pilihan dropdown + upsert target
 │   └── api/upload/route.ts      Upsert batch dengan service role
 ├── components/
 │   ├── dashboard/               Slicer, header, dan 4 pilar
@@ -336,6 +361,13 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 ---
 
 ## Pemecahan Masalah
+
+### Dropdown cabang pada Manajemen Target kosong
+
+Daftar cabang diambil dari data kredit yang sudah masuk. Bila `kredit_records`
+masih kosong, dropdown ikut kosong — unggah berkas SL 18 lebih dulu. Bila
+datanya sudah ada tetapi dropdown tetap kosong, view `dimensi_kredit` belum
+terbentuk; jalankan ulang `supabase/schema.sql`.
 
 ### Seksi DPK atau Data Akun menyebut tabelnya belum ada
 

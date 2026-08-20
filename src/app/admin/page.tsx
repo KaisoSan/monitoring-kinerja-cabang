@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, Database, ShieldCheck, ShieldX } from "lucide-react";
-import { ExcelUploader } from "@/components/admin/ExcelUploader";
+import { AdminTabs } from "@/components/admin/AdminTabs";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { SetupNotice } from "@/components/admin/SetupNotice";
 import { NeuCard, SectionHeader } from "@/components/ui/NeuCard";
@@ -97,10 +97,10 @@ export default async function AdminPage() {
           </div>
         </NeuCard>
       ) : isSupabaseConfigured ? (
-        <div className="space-y-5">
-          <ExcelUploader enabled={uploadEnabled} />
-
-          <NeuCard>
+        <AdminTabs
+          uploadEnabled={uploadEnabled}
+          riwayat={
+            <NeuCard>
             <SectionHeader
               eyebrow="Riwayat"
               title="Unggahan Terakhir"
@@ -136,8 +136,9 @@ export default async function AdminPage() {
                 ))}
               </ul>
             )}
-          </NeuCard>
-        </div>
+            </NeuCard>
+          }
+        />
       ) : (
         <NeuCard>
           <SectionHeader
