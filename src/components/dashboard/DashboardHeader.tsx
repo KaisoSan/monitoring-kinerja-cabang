@@ -18,7 +18,12 @@ export function DashboardHeader({
   userEmail: string | null;
 }) {
   return (
-    <header className="neu mb-5 rounded-3xl p-5 sm:p-6">
+    // `relative z-50` bukan hiasan: Slicer Global di bawahnya memakai
+    // `sticky z-40`, yang membentuk stacking context tersendiri dan menutupi
+    // apa pun yang tidak diposisikan. Tanpa ini, panel dropdown periode
+    // (z-30 di dalam header) tenggelam di belakang slicer dan tidak bisa
+    // diklik. Angkanya harus tetap di atas z-40 milik slicer.
+    <header className="neu relative z-50 mb-5 rounded-3xl p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <span className="neu-sm text-bni-teal-700 grid size-12 shrink-0 place-items-center rounded-2xl">
