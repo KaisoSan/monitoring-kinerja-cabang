@@ -79,3 +79,39 @@ export function DashboardStatus({
     </NeuCard>
   );
 }
+
+/**
+ * Versi ringkas untuk dipakai di dalam kartu seksi, ketika hanya satu
+ * dataset yang bermasalah sementara sisa dashboard tetap tampil.
+ */
+export function DashboardStatusInline({
+  state,
+  message,
+  kosongJudul,
+  kosongPesan,
+}: {
+  state: DashboardState;
+  message: string | null;
+  kosongJudul: string;
+  kosongPesan: string;
+}) {
+  const kosong = state === "ok";
+
+  return (
+    <div className="neu-inset rounded-2xl px-5 py-8 text-center">
+      <span
+        className={`neu-sm mx-auto mb-3 grid size-11 place-items-center rounded-2xl ${
+          kosong ? "text-bni-teal-700" : "text-state-bad-text"
+        }`}
+      >
+        {kosong ? <Inbox size={18} /> : PRESET[state].icon}
+      </span>
+      <p className="text-ink-900 text-sm font-bold">
+        {kosong ? kosongJudul : PRESET[state].title}
+      </p>
+      <p className="text-ink-500 mx-auto mt-1.5 max-w-md text-sm">
+        {kosong ? kosongPesan : message}
+      </p>
+    </div>
+  );
+}

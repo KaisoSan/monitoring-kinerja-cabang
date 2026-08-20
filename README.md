@@ -68,6 +68,28 @@ dikunci nama kolom aslinya dalam snake_case. Kolom yang punya padanan field
 bertipe (mis. `Bk Debet` -> `baki_debet`) tetap jatuh ke field tersebut bila
 snapshot kosong, misalnya pada data yang diunggah sebelum fitur ini ada.
 
+### Dua Dataset Tambahan
+
+Selain SL 18, dashboard membaca dua format berkas lain yang strukturnya
+berbeda. Keduanya punya tabel, opsi unggah, dan seksi dashboard sendiri.
+
+| | DPK — Top 30 Looser | Data Akun |
+|---|---|---|
+| Tabel | `dpk_looser` | `akun_records` |
+| Struktur berkas | **Satu sheet per outlet**, judul kolom di **baris ke-4** | Sheet `OLD_ACCOUNT` dan `NEW_ACCOUNT` (akhiran garis bawah ikut dikenali) |
+| Yang dibaca | Seluruh sheet sekaligus; sheet kosong dilewati | Kedua sheet sekaligus; sheet lain diabaikan |
+| Catatan khusus | Kolom S/C–Jenis Produk hanya terisi di baris pertama lalu diteruskan ke bawah. Tanggal pembanding diambil dari judul kolom `Saldo <tanggal>`. Selisih dihitung ulang dari kedua kolom saldo. | Kolom PII (NIK, telepon, alamat) **tidak** disimpan. Ringkasan dikerjakan PostgreSQL lewat view karena satu berkas bisa memuat puluhan ribu rekening. |
+| Seksi dashboard | Penurunan saldo per outlet + tabel nasabah | Sebaran DPD + portofolio per cabang |
+
+Kedua seksi punya filternya sendiri dan **tidak** mengikuti Slicer Global,
+karena dimensinya berbeda dari SL 18. Hal ini dinyatakan pada deskripsi tiap
+seksi agar tidak salah dibaca.
+
+Tidak ada satu pun kolom pada berkas akun yang benar-benar unik (CIF + No_PK
+hanya menghasilkan 28.545 kombinasi dari 28.551 baris), sehingga kuncinya
+disusun dari kombinasi paling stabil lalu diberi nomor urut saat tetap kembar.
+Kunci tersebut sama setiap kali berkas yang sama diunggah ulang.
+
 ### Akses & Peran
 Begitu Supabase dikonfigurasi, **seluruh permukaan yang menyentuh data kredit
 mewajibkan login**: dashboard, `/api/records`, dan halaman admin. Ada dua
@@ -136,6 +158,10 @@ Buka **SQL Editor** di Supabase Studio, tempel seluruh isi
 - `target_cabang` — target per periode/cabang/produk
   (kunci unik: `periode, cabang, produk`),
 - `upload_logs` — jejak aktivitas unggah,
+- `dpk_looser` dan `akun_records` — dua dataset tambahan (Bagian 2),
+- view agregat `dpk_ringkasan_outlet`, `akun_ringkasan_cabang`, dan
+  `akun_sebaran_dpd`, semuanya dengan `security_invoker = on` supaya RLS pada
+  tabel sumbernya tetap berlaku,
 - trigger `updated_at`, index, dan kebijakan Row Level Security.
 
 Skrip bersifat idempotent, jadi aman dijalankan berulang.
@@ -254,6 +280,7 @@ src/
 │   └── ui/                      Primitif neumorphism
 ├── lib/
 │   ├── columns.ts               Definisi 86 kolom + kolom default
+│   ├── datasets.ts              Pemeta berkas DPK & Akun + gerbang unggah
 │   ├── dates.ts                 Pembentuk & pemvalidasi tanggal ISO
 │   ├── excel.ts                 Pembersih header + parser workbook
 │   ├── navigation.ts            Penyaring redirect `next` (anti open redirect)
@@ -309,6 +336,17 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 ---
 
 ## Pemecahan Masalah
+
+### Seksi DPK atau Data Akun menyebut tabelnya belum ada
+
+Kedua dataset itu ditambahkan pada **Bagian 2** `supabase/schema.sql`. Jalankan
+ulang seluruh isi berkas tersebut di SQL Editor — skripnya idempotent, jadi
+tabel dan data yang sudah ada tidak terpengaruh.
+
+Unggahan ulang memperbarui baris dengan kunci yang sama, tetapi tidak menghapus
+baris lama yang tidak lagi muncul di berkas terbaru. Untuk memuat ulang satu
+periode dari nol, hapus dulu periodenya (perintahnya ada di akhir
+`supabase/schema.sql`).
 
 ### Dashboard kosong padahal data sudah masuk Supabase
 

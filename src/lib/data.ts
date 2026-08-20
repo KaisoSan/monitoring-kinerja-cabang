@@ -268,3 +268,219 @@ export async function loadDetailRecords({
     message: null,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Dataset DPK (Top 30 Looser)                                         */
+/* ------------------------------------------------------------------ */
+
+export type DpkRow = {
+  cabang: string;
+  outlet: string;
+  segmen: string;
+  ranking: number;
+  cif: string;
+  nama: string;
+  saldo_awal: number;
+  saldo_akhir: number;
+  delta_saldo: number;
+};
+
+export type DpkData = {
+  rows: DpkRow[];
+  periode: string | null;
+  tanggalAwal: string | null;
+  tanggalAkhir: string | null;
+  state: DashboardState;
+  message: string | null;
+};
+
+const DPK_MAX_ROWS = 5000;
+
+export async function loadDpkData(): Promise<DpkData> {
+  const empty = (state: DashboardState, message: string | null): DpkData => ({
+    rows: [],
+    periode: null,
+    tanggalAwal: null,
+    tanggalAkhir: null,
+    state,
+    message,
+  });
+
+  if (!isSupabaseConfigured) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+  const supabase = await createServerSupabase();
+  if (!supabase) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+
+  const { data: session } = await supabase.auth.getUser();
+  if (!session?.user) return empty("tanpa-sesi", NO_SESSION);
+
+  const latest = await supabase
+    .from("dpk_looser")
+    .select("periode")
+    .order("periode", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latest.error) {
+    return empty(
+      "galat",
+      `Gagal membaca tabel dpk_looser: ${latest.error.message}. ` +
+        "Pastikan bagian 2 pada supabase/schema.sql sudah dijalankan.",
+    );
+  }
+
+  const periode = latest.data?.periode ?? null;
+  if (!periode) return { ...empty("ok", null), periode: null };
+
+  const { data, error } = await supabase
+    .from("dpk_looser")
+    .select(
+      "cabang, outlet, segmen, ranking, cif, nama, saldo_awal, saldo_akhir, " +
+        "delta_saldo, tanggal_awal, tanggal_akhir",
+    )
+    .eq("periode", periode)
+    .order("delta_saldo", { ascending: true })
+    .limit(DPK_MAX_ROWS);
+
+  if (error) return empty("galat", `Gagal memuat data DPK: ${error.message}`);
+
+  const rows = (data ?? []) as unknown as RawRecord[];
+  return {
+    rows: rows.map((row) => ({
+      cabang: str(row.cabang, "Tanpa Cabang"),
+      outlet: str(row.outlet, "Tanpa Outlet"),
+      segmen: str(row.segmen, "-"),
+      ranking: num(row.ranking),
+      cif: str(row.cif),
+      nama: str(row.nama, "-"),
+      saldo_awal: num(row.saldo_awal),
+      saldo_akhir: num(row.saldo_akhir),
+      delta_saldo: num(row.delta_saldo),
+    })),
+    periode,
+    tanggalAwal: typeof rows[0]?.tanggal_awal === "string" ? rows[0].tanggal_awal : null,
+    tanggalAkhir: typeof rows[0]?.tanggal_akhir === "string" ? rows[0].tanggal_akhir : null,
+    state: "ok",
+    message: null,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Dataset Akun (OLD_ACCOUNT / NEW_ACCOUNT)                            */
+/* ------------------------------------------------------------------ */
+
+export type AkunCabangRow = {
+  sumber: string;
+  area: string;
+  branch_name: string;
+  jumlah_rekening: number;
+  total_baki_debet: number;
+  total_tunggakan: number;
+  jumlah_npl: number;
+  baki_debet_npl: number;
+  jumlah_menunggak: number;
+};
+
+export type AkunDpdRow = {
+  sumber: string;
+  dpd_kategori: string;
+  jumlah_rekening: number;
+  total_baki_debet: number;
+};
+
+export type AkunData = {
+  cabang: AkunCabangRow[];
+  dpd: AkunDpdRow[];
+  periode: string | null;
+  state: DashboardState;
+  message: string | null;
+};
+
+/**
+ * Membaca ringkasan akun dari view agregat, bukan dari tabel barisnya.
+ * Satu unggahan bisa berisi puluhan ribu rekening, jadi peringkasan
+ * dikerjakan PostgreSQL dan browser hanya menerima hasilnya.
+ */
+export async function loadAkunData(): Promise<AkunData> {
+  const empty = (state: DashboardState, message: string | null): AkunData => ({
+    cabang: [],
+    dpd: [],
+    periode: null,
+    state,
+    message,
+  });
+
+  if (!isSupabaseConfigured) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+  const supabase = await createServerSupabase();
+  if (!supabase) return empty("belum-dikonfigurasi", NOT_CONFIGURED);
+
+  const { data: session } = await supabase.auth.getUser();
+  if (!session?.user) return empty("tanpa-sesi", NO_SESSION);
+
+  const latest = await supabase
+    .from("akun_records")
+    .select("periode")
+    .order("periode", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latest.error) {
+    return empty(
+      "galat",
+      `Gagal membaca tabel akun_records: ${latest.error.message}. ` +
+        "Pastikan bagian 2 pada supabase/schema.sql sudah dijalankan.",
+    );
+  }
+
+  const periode = latest.data?.periode ?? null;
+  if (!periode) return { ...empty("ok", null), periode: null };
+
+  const [cabangQuery, dpdQuery] = await Promise.all([
+    supabase
+      .from("akun_ringkasan_cabang")
+      .select(
+        "sumber, area, branch_name, jumlah_rekening, total_baki_debet, " +
+          "total_tunggakan, jumlah_npl, baki_debet_npl, jumlah_menunggak",
+      )
+      .eq("periode", periode),
+    supabase
+      .from("akun_sebaran_dpd")
+      .select("sumber, dpd_kategori, jumlah_rekening, total_baki_debet")
+      .eq("periode", periode)
+      .order("dpd_kategori", { ascending: true }),
+  ]);
+
+  if (cabangQuery.error || dpdQuery.error) {
+    const message = cabangQuery.error?.message ?? dpdQuery.error?.message ?? "";
+    return empty(
+      "galat",
+      `Gagal memuat ringkasan akun: ${message}. ` +
+        "View agregat mungkin belum dibuat; jalankan ulang supabase/schema.sql.",
+    );
+  }
+
+  const cabangRows = (cabangQuery.data ?? []) as unknown as RawRecord[];
+  const dpdRows = (dpdQuery.data ?? []) as unknown as RawRecord[];
+
+  return {
+    cabang: cabangRows.map((row) => ({
+      sumber: str(row.sumber, "old"),
+      area: str(row.area, "-"),
+      branch_name: str(row.branch_name, "Tanpa Cabang"),
+      jumlah_rekening: num(row.jumlah_rekening),
+      total_baki_debet: num(row.total_baki_debet),
+      total_tunggakan: num(row.total_tunggakan),
+      jumlah_npl: num(row.jumlah_npl),
+      baki_debet_npl: num(row.baki_debet_npl),
+      jumlah_menunggak: num(row.jumlah_menunggak),
+    })),
+    dpd: dpdRows.map((row) => ({
+      sumber: str(row.sumber, "old"),
+      dpd_kategori: str(row.dpd_kategori, "Tidak diketahui"),
+      jumlah_rekening: num(row.jumlah_rekening),
+      total_baki_debet: num(row.total_baki_debet),
+    })),
+    periode,
+    state: "ok",
+    message: null,
+  };
+}

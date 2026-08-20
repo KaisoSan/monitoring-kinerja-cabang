@@ -404,26 +404,18 @@ export type ParseResult<T> = {
  * Membaca file Excel di browser dan mengembalikan baris mentah dengan
  * header yang sudah dibersihkan menjadi snake_case.
  */
-export async function readWorkbook(
-  file: File,
-  sheetName?: string,
-): Promise<{
+export type SheetResult = {
   rows: RawRow[];
   /** Sejajar dengan `rows`, dikunci nama kolom asli (tanpa alias). */
   rawRows: RawRow[];
   headerMap: ParseResult<never>["headerMap"];
   sheetName: string;
-  sheetNames: string[];
-}> {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+};
 
-  const targetSheet = sheetName ?? workbook.SheetNames[0];
-  if (!targetSheet) throw new Error("File Excel tidak memiliki sheet apa pun.");
+export type WorkbookResult = SheetResult & { sheetNames: string[] };
 
-  const sheet = workbook.Sheets[targetSheet];
-  if (!sheet) throw new Error(`Sheet "${targetSheet}" tidak ditemukan.`);
-
+/** Membaca satu worksheet yang sudah di-parse menjadi baris berkunci kolom. */
+function readSheet(sheet: XLSX.WorkSheet, sheetName: string): SheetResult {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     blankrows: false,
@@ -431,7 +423,11 @@ export async function readWorkbook(
   });
 
   const headerRowIndex = findHeaderRow(matrix);
-  if (headerRowIndex === -1) throw new Error("Baris header tidak ditemukan di sheet ini.");
+  if (headerRowIndex === -1) {
+    // Sheet kosong atau tanpa header bukan alasan menggagalkan seluruh
+    // berkas: berkas asli kerap menyertakan sheet sisa yang kosong.
+    return { rows: [], rawRows: [], headerMap: [], sheetName };
+  }
 
   const rawHeaders = (matrix[headerRowIndex] ?? []).map((cell) => toText(cell));
   const headerMap: ParseResult<never>["headerMap"] = [];
@@ -484,7 +480,50 @@ export async function readWorkbook(
     rawRows.push(snapshot);
   }
 
-  return { rows, rawRows, headerMap, sheetName: targetSheet, sheetNames: workbook.SheetNames };
+  return { rows, rawRows, headerMap, sheetName };
+}
+
+/**
+ * Membaca file Excel di browser dan mengembalikan baris mentah dengan
+ * header yang sudah dibersihkan menjadi snake_case.
+ */
+export async function readWorkbook(
+  file: File,
+  sheetName?: string,
+): Promise<WorkbookResult> {
+  const workbook = await parseWorkbook(file);
+
+  const targetSheet = sheetName ?? workbook.SheetNames[0];
+  if (!targetSheet) throw new Error("File Excel tidak memiliki sheet apa pun.");
+
+  const sheet = workbook.Sheets[targetSheet];
+  if (!sheet) throw new Error(`Sheet "${targetSheet}" tidak ditemukan.`);
+
+  return { ...readSheet(sheet, targetSheet), sheetNames: workbook.SheetNames };
+}
+
+/**
+ * Membaca SELURUH sheet dalam satu kali parse.
+ *
+ * Dipakai berkas yang memecah datanya per sheet — berkas Top 30 Looser DPK
+ * menaruh satu outlet di tiap sheet, sehingga membaca sheet pertama saja
+ * akan membuang sebagian besar isinya. Parse dilakukan sekali karena berkas
+ * seperti ekstrak akun bisa berukuran puluhan megabita.
+ */
+export async function readAllSheets(file: File): Promise<{
+  sheets: SheetResult[];
+  sheetNames: string[];
+}> {
+  const workbook = await parseWorkbook(file);
+  return {
+    sheets: workbook.SheetNames.map((name) => readSheet(workbook.Sheets[name], name)),
+    sheetNames: workbook.SheetNames,
+  };
+}
+
+async function parseWorkbook(file: File): Promise<XLSX.WorkBook> {
+  const buffer = await file.arrayBuffer();
+  return XLSX.read(buffer, { type: "array", cellDates: true });
 }
 
 /**
@@ -678,6 +717,10 @@ export function mapRowsForDataset(
 export const REQUIRED_COLUMNS: Record<UploadDataset, string[]> = {
   kredit_records: ["cabang", "produk", "pengelola"],
   target_cabang: ["cabang", "target_baki_debet"],
+  // Dua dataset berikut divalidasi oleh pemetanya sendiri di `datasets.ts`,
+  // karena kolom wajibnya bergantung pada sheet dan judul kolom bertanggal.
+  dpk_looser: [],
+  akun_records: [],
 };
 
 export function findMissingColumns(dataset: UploadDataset, headers: string[]): string[] {

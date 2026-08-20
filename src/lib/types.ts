@@ -77,17 +77,107 @@ export const SLICER_LABELS: Record<SlicerKey, string> = {
   pengelola: "Pengelola (RM)",
 };
 
+/**
+ * Top 30 Looser DPK — satu baris per nasabah, per outlet, per periode.
+ * Berkas sumbernya memecah data per sheet (satu sheet = satu outlet).
+ */
+export type DpkLooser = {
+  periode: string;
+  tanggal_awal: string | null;
+  tanggal_akhir: string | null;
+  sc: string;
+  cabang: string;
+  outlet: string;
+  jenis_produk: string;
+  ranking: number;
+  cif: string;
+  nama: string;
+  segmen: string;
+  saldo_awal: number;
+  saldo_akhir: number;
+  /** `saldo_akhir - saldo_awal`; negatif berarti dana keluar. */
+  delta_saldo: number;
+  raw?: Record<string, unknown>;
+};
+
+/** Sheet asal pada berkas data mentah akun. */
+export const AKUN_SUMBER = ["old", "new"] as const;
+export type AkunSumber = (typeof AKUN_SUMBER)[number];
+
+/**
+ * Data mentah akun dari sheet OLD_ACCOUNT / NEW_ACCOUNT.
+ *
+ * Hanya kolom yang dipakai analisis yang dipetakan. Kolom PII pada berkas
+ * sumber (NIK, nomor telepon, alamat) sengaja tidak ikut disimpan.
+ */
+export type AkunRecord = {
+  periode: string;
+  sumber: AkunSumber;
+  /** Kunci turunan yang stabil untuk upsert. */
+  kode_akun: string;
+  cif: string;
+  nama_debitur: string;
+  no_pk: string;
+  area: string;
+  branch_code: string;
+  branch_name: string;
+  kode_outlet: string;
+  nama_outlet: string;
+  nama_akk: string;
+  produk: string;
+  tipe: string;
+  program: string;
+  segmen_ews: string;
+  segmen_kelola: string;
+  sektor_ekonomi: string;
+  ket_status: string;
+  plafon: number;
+  baki_debet: number;
+  outstanding: number;
+  saldo_akhir: number;
+  total_tunggakan: number;
+  total_kewajiban: number;
+  /** Kategori apa adanya dari berkas, mis. `1. current`, `8. 181+ dpd`. */
+  dpd_kategori: string;
+  dpd_hari: number;
+  golongan: number;
+  suku_bunga: number | null;
+  tanggal_buka: string | null;
+  tanggal_jatuh_tempo: string | null;
+};
+
 /** Dataset yang bisa diunggah lewat halaman admin. */
-export const UPLOAD_DATASETS = ["kredit_records", "target_cabang"] as const;
+export const UPLOAD_DATASETS = [
+  "kredit_records",
+  "target_cabang",
+  "dpk_looser",
+  "akun_records",
+] as const;
 export type UploadDataset = (typeof UPLOAD_DATASETS)[number];
 
 export const UPLOAD_DATASET_LABELS: Record<UploadDataset, string> = {
-  kredit_records: "Data Kredit (per debitur / fasilitas)",
+  kredit_records: "SL 18 - Data Kredit (per debitur / fasilitas)",
   target_cabang: "Target Cabang (per produk)",
+  dpk_looser: "DPK - Top 30 Looser (satu sheet per outlet)",
+  akun_records: "Data Akun (sheet OLD_ACCOUNT / NEW_ACCOUNT)",
+};
+
+/** Keterangan singkat yang ditampilkan di halaman unggah. */
+export const UPLOAD_DATASET_HINTS: Record<UploadDataset, string> = {
+  kredit_records: "Berkas SL 18 dengan 86 kolom; judul kolom terdeteksi otomatis.",
+  target_cabang: "Target per periode, cabang, dan produk.",
+  dpk_looser:
+    "Judul kolom di baris ke-4. Seluruh sheet dibaca (satu sheet = satu outlet), " +
+    "dan tanggal saldo diambil dari judul kolom \"Saldo <tanggal>\".",
+  akun_records:
+    "Sheet OLD_ACCOUNT dan NEW_ACCOUNT dibaca sekaligus. Kolom PII (NIK, telepon, " +
+    "alamat) tidak ikut disimpan. Isi Periode sesuai posisi data (as of).",
 };
 
 /** Kolom kunci `on conflict` untuk masing-masing dataset. */
 export const UPLOAD_CONFLICT_KEYS: Record<UploadDataset, string> = {
   kredit_records: "kode_fasilitas",
   target_cabang: "periode,cabang,produk",
+  dpk_looser: "periode,outlet,cif",
+  akun_records: "periode,sumber,kode_akun",
 };

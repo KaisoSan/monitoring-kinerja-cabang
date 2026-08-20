@@ -71,8 +71,13 @@ export async function POST(request: Request) {
   }
 
   // Payload dari klien tidak dipercaya: hanya kolom yang dikenal yang lolos.
-  const sanitize =
-    dataset === "kredit_records" ? sanitizeKreditRecord : sanitizeTargetCabang;
+  const SANITIZERS: Record<UploadDataset, (row: Json) => Json | null> = {
+    kredit_records: sanitizeKreditRecord,
+    target_cabang: sanitizeTargetCabang,
+    dpk_looser: sanitizeDpkLooser,
+    akun_records: sanitizeAkunRecord,
+  };
+  const sanitize = SANITIZERS[dataset as UploadDataset];
 
   // Lapis terakhir sebelum menyentuh database: apa pun yang lolos dari
   // pemetaan di atas tetap disapu ulang secara rekursif, sehingga tidak ada
@@ -224,6 +229,84 @@ function sanitizeRaw(value: unknown): Json {
     count += 1;
   }
   return result;
+}
+
+function sanitizeDpkLooser(row: Json): Json | null {
+  const cif = text(row.cif, "", 60);
+  const outlet = text(row.outlet, "", 120);
+  const periode = isoDate(row.periode);
+  if (!cif || !outlet || !periode) return null;
+
+  const saldoAwal = numeric(row.saldo_awal);
+  const saldoAkhir = numeric(row.saldo_akhir);
+
+  return {
+    periode,
+    tanggal_awal: isoDate(row.tanggal_awal),
+    tanggal_akhir: isoDate(row.tanggal_akhir),
+    sc: text(row.sc, "", 20),
+    cabang: text(row.cabang, "Tanpa Cabang", 120),
+    outlet,
+    jenis_produk: text(row.jenis_produk, "", 60),
+    ranking: Math.max(0, Math.round(numeric(row.ranking))),
+    cif,
+    nama: text(row.nama, "-"),
+    segmen: text(row.segmen, "", 40),
+    saldo_awal: saldoAwal,
+    saldo_akhir: saldoAkhir,
+    // Dihitung ulang di server agar tetap konsisten walau klien mengirim
+    // selisih yang berbeda.
+    delta_saldo: saldoAkhir - saldoAwal,
+    raw: sanitizeRaw(row.raw),
+  };
+}
+
+const AKUN_SUMBER_VALID = new Set(["old", "new"]);
+
+function sanitizeAkunRecord(row: Json): Json | null {
+  const periode = isoDate(row.periode);
+  const sumber = text(row.sumber, "", 10).toLowerCase();
+  const kodeAkun = text(row.kode_akun, "", 160);
+  if (!periode || !kodeAkun || !AKUN_SUMBER_VALID.has(sumber)) return null;
+
+  const golongan = Math.round(numeric(row.golongan));
+  const sukuBunga = row.suku_bunga === null || row.suku_bunga === undefined
+    ? null
+    : numeric(row.suku_bunga);
+
+  return {
+    periode,
+    sumber,
+    kode_akun: kodeAkun,
+    cif: text(row.cif, "", 60),
+    nama_debitur: text(row.nama_debitur, "-"),
+    no_pk: text(row.no_pk, "", 120),
+    area: text(row.area, "", 120),
+    branch_code: text(row.branch_code, "", 40),
+    branch_name: text(row.branch_name, "Tanpa Cabang", 120),
+    kode_outlet: text(row.kode_outlet, "", 40),
+    nama_outlet: text(row.nama_outlet, "", 120),
+    nama_akk: text(row.nama_akk, "", 160),
+    produk: text(row.produk, "", 120),
+    tipe: text(row.tipe, "", 40),
+    program: text(row.program, "", 80),
+    segmen_ews: text(row.segmen_ews, "", 80),
+    segmen_kelola: text(row.segmen_kelola, "", 80),
+    sektor_ekonomi: text(row.sektor_ekonomi, "", 120),
+    ket_status: text(row.ket_status, "", 80),
+    plafon: Math.max(0, numeric(row.plafon)),
+    baki_debet: Math.max(0, numeric(row.baki_debet)),
+    outstanding: Math.max(0, numeric(row.outstanding)),
+    saldo_akhir: numeric(row.saldo_akhir),
+    total_tunggakan: Math.max(0, numeric(row.total_tunggakan)),
+    total_kewajiban: Math.max(0, numeric(row.total_kewajiban)),
+    dpd_kategori: text(row.dpd_kategori, "", 60),
+    dpd_hari: Math.max(0, Math.round(numeric(row.dpd_hari))),
+    golongan: golongan >= 1 && golongan <= 5 ? golongan : 1,
+    suku_bunga: sukuBunga !== null && Number.isFinite(sukuBunga) ? sukuBunga : null,
+    tanggal_buka: isoDate(row.tanggal_buka),
+    tanggal_jatuh_tempo: isoDate(row.tanggal_jatuh_tempo),
+  };
 }
 
 function sanitizeTargetCabang(row: Json): Json | null {

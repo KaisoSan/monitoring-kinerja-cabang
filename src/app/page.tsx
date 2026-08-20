@@ -1,7 +1,9 @@
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { DashboardShell } from "@/components/dashboard/DashboardShell";
 import { DashboardStatus } from "@/components/dashboard/DashboardStatus";
-import { loadDashboardData } from "@/lib/data";
+import { SeksiDpk } from "@/components/dashboard/SeksiDpk";
+import { SeksiAkun } from "@/components/dashboard/SeksiAkun";
+import { loadAkunData, loadDashboardData, loadDpkData } from "@/lib/data";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 // Dashboard selalu menampilkan posisi terbaru, jadi tidak boleh di-cache:
@@ -12,7 +14,13 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 export default async function DashboardPage() {
-  const { records, targets, periode, state, message } = await loadDashboardData();
+  // Ketiga dataset berdiri sendiri: kegagalan salah satunya tidak boleh
+  // menjatuhkan seluruh halaman, jadi masing-masing membawa statusnya sendiri.
+  const [{ records, targets, periode, state, message }, dpk, akun] = await Promise.all([
+    loadDashboardData(),
+    loadDpkData(),
+    loadAkunData(),
+  ]);
 
   const supabase = await createServerSupabase();
   const { data } = (await supabase?.auth.getUser()) ?? { data: { user: null } };
@@ -30,6 +38,14 @@ export default async function DashboardPage() {
       ) : (
         <DashboardShell records={records} targets={targets} />
       )}
+
+      <section id="seksi-dpk" className="mt-5 scroll-mt-44">
+        <SeksiDpk data={dpk} />
+      </section>
+
+      <section id="seksi-akun" className="mt-5 scroll-mt-44">
+        <SeksiAkun data={akun} />
+      </section>
       <footer className="text-ink-500 mt-8 pb-4 text-center text-xs">
         Dashboard Monitoring Kinerja Kredit · Data diperbarui melalui unggahan Excel di halaman
         Admin.

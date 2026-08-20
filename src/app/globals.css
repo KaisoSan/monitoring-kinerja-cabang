@@ -61,6 +61,18 @@
   --color-sev-4: #d1601f;
   --color-sev-5: #9c3f0e;
 
+  /* Ramp sekuensial 8 langkah untuk kategori DPD pada berkas akun, yang
+     jumlah kelompoknya lebih banyak daripada kolektibilitas 1-5. Satu hue,
+     terang ke gelap, sehingga urutan keparahannya terbaca dari warnanya. */
+  --color-dpd-1: #ffe0c9;
+  --color-dpd-2: #fdc9a5;
+  --color-dpd-3: #f9ae7c;
+  --color-dpd-4: #f2914f;
+  --color-dpd-5: #e4732b;
+  --color-dpd-6: #cc5a16;
+  --color-dpd-7: #a8440d;
+  --color-dpd-8: #7c3006;
+
   /* Ramp sekuensial teal untuk tahapan funnel (prospek -> analisa -> booking). */
   --color-funnel-1: #7fd0da;
   --color-funnel-2: #2ba7b4;

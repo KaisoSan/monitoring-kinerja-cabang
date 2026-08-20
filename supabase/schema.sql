@@ -139,3 +139,198 @@ create policy "upload_logs baca user login"
 -- 3. Untuk membatasi per Area Head atau per cabang, ganti `using (true)`
 --    dengan pencocokan terhadap klaim JWT, mis.
 --    `using (area_head = auth.jwt() -> 'user_metadata' ->> 'area_head')`.
+
+
+-- =============================================================
+-- BAGIAN 2 - Dataset tambahan
+--
+-- Dua format berkas lain yang bentuknya berbeda dari SL 18:
+--   * dpk_looser   : Top 30 Looser DPK, satu sheet per outlet
+--   * akun_records : data mentah akun (sheet OLD_ACCOUNT / NEW_ACCOUNT)
+-- =============================================================
+
+-- -------------------------------------------------------------
+-- 6. Top 30 Looser DPK
+--    Satu baris = satu nasabah pada satu outlet dan satu periode.
+-- -------------------------------------------------------------
+create table if not exists public.dpk_looser (
+  id             uuid primary key default gen_random_uuid(),
+  /** Tanggal 1 pada bulan `tanggal_akhir`, agar sejajar dengan dataset lain. */
+  periode        date not null,
+  /** Kedua tanggal pembanding, diambil dari judul kolom "Saldo <tanggal>". */
+  tanggal_awal   date,
+  tanggal_akhir  date,
+  sc             text,
+  cabang         text not null,
+  outlet         text not null,
+  jenis_produk   text,
+  ranking        integer,
+  cif            text not null,
+  nama           text,
+  segmen         text,
+  saldo_awal     numeric(20, 2) not null default 0,
+  saldo_akhir    numeric(20, 2) not null default 0,
+  /** saldo_akhir - saldo_awal; negatif berarti dana keluar. */
+  delta_saldo    numeric(20, 2) not null default 0,
+  raw            jsonb not null default '{}'::jsonb,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint dpk_looser_unik unique (periode, outlet, cif)
+);
+
+create index if not exists dpk_looser_periode_idx on public.dpk_looser (periode desc);
+create index if not exists dpk_looser_cabang_idx  on public.dpk_looser (cabang);
+create index if not exists dpk_looser_outlet_idx  on public.dpk_looser (outlet);
+create index if not exists dpk_looser_delta_idx   on public.dpk_looser (delta_saldo);
+
+-- -------------------------------------------------------------
+-- 7. Data mentah akun
+--    Kolom PII (NIK, telepon, alamat) sengaja TIDAK disimpan: kolom
+--    tersebut tidak dipakai analisis, dan menyimpannya hanya memperluas
+--    permukaan data pribadi yang harus dijaga. Karena alasan yang sama
+--    tabel ini tidak menyimpan snapshot `raw` seluruh 129 kolom.
+-- -------------------------------------------------------------
+create table if not exists public.akun_records (
+  id                 uuid primary key default gen_random_uuid(),
+  /** Posisi data (as of), diisi dari kolom Periode pada halaman unggah. */
+  periode            date not null,
+  /** Sheet asalnya: OLD_ACCOUNT atau NEW_ACCOUNT. */
+  sumber             text not null check (sumber in ('old', 'new')),
+  /** Kunci turunan yang stabil; lihat catatan pada src/lib/datasets.ts. */
+  kode_akun          text not null,
+
+  cif                text,
+  nama_debitur       text,
+  no_pk              text,
+  area               text,
+  branch_code        text,
+  branch_name        text,
+  kode_outlet        text,
+  nama_outlet        text,
+  nama_akk           text,
+
+  produk             text,
+  tipe               text,
+  program            text,
+  segmen_ews         text,
+  segmen_kelola      text,
+  sektor_ekonomi     text,
+  ket_status         text,
+
+  plafon             numeric(20, 2) not null default 0,
+  baki_debet         numeric(20, 2) not null default 0,
+  outstanding        numeric(20, 2) not null default 0,
+  saldo_akhir        numeric(20, 2) not null default 0,
+  total_tunggakan    numeric(20, 2) not null default 0,
+  total_kewajiban    numeric(20, 2) not null default 0,
+
+  /** Kategori DPD apa adanya dari berkas, mis. "1. current", "8. 181+ dpd". */
+  dpd_kategori       text,
+  dpd_hari           integer not null default 0,
+  golongan           smallint not null default 1 check (golongan between 1 and 5),
+  suku_bunga         numeric(8, 4),
+
+  tanggal_buka       date,
+  tanggal_jatuh_tempo date,
+
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  constraint akun_records_unik unique (periode, sumber, kode_akun)
+);
+
+create index if not exists akun_records_periode_idx  on public.akun_records (periode desc);
+create index if not exists akun_records_sumber_idx   on public.akun_records (sumber);
+create index if not exists akun_records_branch_idx   on public.akun_records (branch_name);
+create index if not exists akun_records_area_idx     on public.akun_records (area);
+create index if not exists akun_records_golongan_idx on public.akun_records (golongan);
+
+-- -------------------------------------------------------------
+-- 8. Trigger updated_at untuk tabel baru
+-- -------------------------------------------------------------
+drop trigger if exists dpk_looser_set_updated_at on public.dpk_looser;
+create trigger dpk_looser_set_updated_at
+  before update on public.dpk_looser
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists akun_records_set_updated_at on public.akun_records;
+create trigger akun_records_set_updated_at
+  before update on public.akun_records
+  for each row execute function public.set_updated_at();
+
+-- -------------------------------------------------------------
+-- 9. View agregat
+--    Tabel akun bisa memuat puluhan ribu baris, jadi dashboard TIDAK
+--    memuat barisnya satu per satu. Peringkasan dikerjakan PostgreSQL
+--    lewat view di bawah, dan yang dikirim ke browser hanya hasilnya.
+--
+--    `security_invoker = on` wajib: tanpa itu view dieksekusi dengan hak
+--    pemiliknya dan justru melewati RLS pada tabel sumbernya.
+-- -------------------------------------------------------------
+drop view if exists public.dpk_ringkasan_outlet;
+create view public.dpk_ringkasan_outlet
+  with (security_invoker = on) as
+select
+  periode,
+  cabang,
+  outlet,
+  count(*)::bigint            as jumlah_nasabah,
+  sum(saldo_awal)             as total_saldo_awal,
+  sum(saldo_akhir)            as total_saldo_akhir,
+  sum(delta_saldo)            as total_delta,
+  min(tanggal_awal)           as tanggal_awal,
+  max(tanggal_akhir)          as tanggal_akhir
+from public.dpk_looser
+group by periode, cabang, outlet;
+
+drop view if exists public.akun_ringkasan_cabang;
+create view public.akun_ringkasan_cabang
+  with (security_invoker = on) as
+select
+  periode,
+  sumber,
+  area,
+  branch_name,
+  count(*)::bigint                                          as jumlah_rekening,
+  sum(baki_debet)                                           as total_baki_debet,
+  sum(total_tunggakan)                                      as total_tunggakan,
+  count(*) filter (where golongan >= 3)::bigint             as jumlah_npl,
+  sum(baki_debet) filter (where golongan >= 3)              as baki_debet_npl,
+  count(*) filter (where dpd_hari > 0)::bigint              as jumlah_menunggak
+from public.akun_records
+group by periode, sumber, area, branch_name;
+
+drop view if exists public.akun_sebaran_dpd;
+create view public.akun_sebaran_dpd
+  with (security_invoker = on) as
+select
+  periode,
+  sumber,
+  coalesce(nullif(dpd_kategori, ''), 'Tidak diketahui') as dpd_kategori,
+  count(*)::bigint                                      as jumlah_rekening,
+  sum(baki_debet)                                       as total_baki_debet
+from public.akun_records
+group by periode, sumber, coalesce(nullif(dpd_kategori, ''), 'Tidak diketahui');
+
+-- -------------------------------------------------------------
+-- 10. RLS untuk tabel baru (sama seperti tabel lain: hanya user login)
+-- -------------------------------------------------------------
+alter table public.dpk_looser   enable row level security;
+alter table public.akun_records enable row level security;
+
+drop policy if exists "dpk_looser baca user login" on public.dpk_looser;
+create policy "dpk_looser baca user login"
+  on public.dpk_looser for select
+  to authenticated
+  using (true);
+
+drop policy if exists "akun_records baca user login" on public.akun_records;
+create policy "akun_records baca user login"
+  on public.akun_records for select
+  to authenticated
+  using (true);
+
+-- Catatan: unggahan ulang memperbarui baris dengan kunci yang sama, tetapi
+-- TIDAK menghapus baris lama yang hilang dari berkas terbaru. Untuk memuat
+-- ulang satu periode dari nol, hapus dulu periodenya:
+--   delete from public.dpk_looser   where periode = '2026-08-01';
+--   delete from public.akun_records where periode = '2026-06-30' and sumber = 'old';

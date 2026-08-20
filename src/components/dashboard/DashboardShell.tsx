@@ -35,6 +35,8 @@ const SECTIONS = [
   { id: "pilar-produktivitas", label: "Produktivitas" },
   { id: "pilar-kualitas", label: "Kualitas Kredit" },
   { id: "tabel-detail", label: "Data Detail" },
+  { id: "seksi-dpk", label: "DPK Looser" },
+  { id: "seksi-akun", label: "Data Akun" },
 ];
 
 export function DashboardShell({

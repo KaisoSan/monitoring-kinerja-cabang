@@ -14,36 +14,21 @@ import {
 } from "lucide-react";
 import { NeuCard, SectionHeader } from "@/components/ui/NeuCard";
 import { Badge, ProgressBar } from "@/components/ui/Badge";
-import {
-  findMissingColumns,
-  mapRowsForDataset,
-  readWorkbook,
-  type ParseIssue,
-} from "@/lib/excel";
+import { type ParseIssue } from "@/lib/excel";
+import { chunkSizeFor, parseUploadFile, type ParsedUpload } from "@/lib/datasets";
 import { formatNumber } from "@/lib/format";
 import {
   UPLOAD_DATASETS,
+  UPLOAD_DATASET_HINTS,
   UPLOAD_DATASET_LABELS,
-  type KreditRecord,
-  type TargetCabang,
   type UploadDataset,
 } from "@/lib/types";
 
 const ACCEPTED = [".xlsx", ".xls", ".xlsm", ".csv"];
-/** Baris per request; server memecah lagi menjadi batch upsert 500 baris. */
-const CHUNK_SIZE = 400;
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/** Berkas ekstrak akun bisa jauh lebih besar daripada SL 18. */
+const MAX_FILE_BYTES = 60 * 1024 * 1024;
 
-type Parsed = {
-  fileName: string;
-  sheetName: string;
-  sheetNames: string[];
-  headerMap: { original: string; normalized: string }[];
-  rows: (KreditRecord | TargetCabang)[];
-  issues: ParseIssue[];
-  totalRaw: number;
-  missingColumns: string[];
-};
+type Parsed = ParsedUpload & { fileName: string };
 
 function currentMonth(): string {
   const now = new Date();
@@ -79,34 +64,26 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
       }
 
       setParsing(true);
-      const toastId = toast.loading("Membaca file Excel...");
+      const toastId = toast.loading(
+        file.size > 5 * 1024 * 1024
+          ? "Membaca file Excel besar, mohon tunggu..."
+          : "Membaca file Excel...",
+      );
 
       try {
-        const workbook = await readWorkbook(file, sheetName);
-        const { rows, issues } = mapRowsForDataset(
-          dataset,
-          workbook.rows,
-          defaultPeriode,
-          workbook.rawRows,
-        );
-        const headers = workbook.headerMap.map((entry) => entry.normalized);
-        const missingColumns = findMissingColumns(dataset, headers);
+        const result = await parseUploadFile(file, dataset, defaultPeriode, sheetName);
+        setParsed({ ...result, fileName: file.name });
 
-        setParsed({
-          fileName: file.name,
-          sheetName: workbook.sheetName,
-          sheetNames: workbook.sheetNames,
-          headerMap: workbook.headerMap,
-          rows,
-          issues,
-          totalRaw: workbook.rows.length,
-          missingColumns,
-        });
-
-        if (missingColumns.length > 0) {
-          toast.error(`Kolom wajib belum terbaca: ${missingColumns.join(", ")}`, { id: toastId });
+        if (result.missingColumns.length > 0) {
+          toast.error(`Kolom wajib belum terbaca: ${result.missingColumns.join(", ")}`, {
+            id: toastId,
+          });
+        } else if (result.rows.length === 0) {
+          toast.error("Tidak ada baris yang bisa dibaca dari berkas ini.", { id: toastId });
         } else {
-          toast.success(`${formatNumber(rows.length)} baris siap diunggah.`, { id: toastId });
+          toast.success(`${formatNumber(result.rows.length)} baris siap diunggah.`, {
+            id: toastId,
+          });
         }
       } catch (error) {
         setParsed(null);
@@ -138,9 +115,10 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
     setProgress(0);
     const toastId = toast.loading("Mengunggah ke Supabase...");
 
-    const chunks: (KreditRecord | TargetCabang)[][] = [];
-    for (let i = 0; i < parsed.rows.length; i += CHUNK_SIZE) {
-      chunks.push(parsed.rows.slice(i, i + CHUNK_SIZE));
+    const chunkSize = chunkSizeFor(dataset);
+    const chunks: unknown[][] = [];
+    for (let i = 0; i < parsed.rows.length; i += chunkSize) {
+      chunks.push(parsed.rows.slice(i, i + chunkSize));
     }
 
     let processed = 0;
@@ -244,6 +222,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
               </option>
             ))}
           </select>
+          <p className="text-ink-500 mt-1.5 text-xs">{UPLOAD_DATASET_HINTS[dataset]}</p>
         </div>
 
         <div>
@@ -326,7 +305,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
               <FileSpreadsheet size={12} />
               {parsed.fileName}
             </Badge>
-            <Badge tone="neutral">Sheet: {parsed.sheetName}</Badge>
+            <Badge tone="neutral">Sheet: {parsed.sheetLabel}</Badge>
             <Badge tone={parsed.rows.length > 0 ? "good" : "bad"}>
               {formatNumber(parsed.rows.length)} baris valid
             </Badge>
@@ -349,7 +328,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
             </button>
           </div>
 
-          {parsed.sheetNames.length > 1 ? (
+          {!parsed.multiSheet && parsed.sheetNames.length > 1 ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-ink-500 text-xs font-semibold">Ganti sheet:</span>
               {parsed.sheetNames.map((name) => (
@@ -359,7 +338,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
                   disabled={busy || !lastFile}
                   onClick={() => lastFile && void parseFile(lastFile, name)}
                   className={`neu-press rounded-xl px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
-                    name === parsed.sheetName ? "text-bni-teal-700" : "text-ink-700"
+                    name === parsed.sheetLabel ? "text-bni-teal-700" : "text-ink-700"
                   }`}
                 >
                   {name}
@@ -377,6 +356,19 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
                 atau tambahkan aliasnya pada <code>HEADER_ALIASES</code> di{" "}
                 <code>src/lib/excel.ts</code>.
               </p>
+            </div>
+          ) : null}
+
+          {parsed.notes.length > 0 ? (
+            <div className="neu-inset text-ink-700 rounded-2xl p-4 text-sm">
+              <p className="text-ink-500 mb-2 text-[0.7rem] font-bold tracking-wider uppercase">
+                Hasil Pembacaan
+              </p>
+              <ul className="list-inside list-disc space-y-1">
+                {parsed.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
@@ -411,7 +403,7 @@ export function ExcelUploader({ enabled }: { enabled: boolean }) {
             <button
               type="button"
               disabled={busy || !lastFile}
-              onClick={() => lastFile && void parseFile(lastFile, parsed.sheetName)}
+              onClick={() => lastFile && void parseFile(lastFile, parsed.multiSheet ? undefined : parsed.sheetLabel)}
               className="neu-press text-ink-700 flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:opacity-50"
             >
               <RefreshCcw size={15} />
