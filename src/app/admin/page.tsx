@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { ArrowLeft, Database, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Database, ShieldCheck, ShieldX } from "lucide-react";
 import { ExcelUploader } from "@/components/admin/ExcelUploader";
 import { LogoutButton } from "@/components/admin/LogoutButton";
 import { SetupNotice } from "@/components/admin/SetupNotice";
 import { NeuCard, SectionHeader } from "@/components/ui/NeuCard";
 import { Badge } from "@/components/ui/Badge";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isAdminEmail, isSupabaseConfigured } from "@/lib/supabase/config";
 import { formatNumber } from "@/lib/format";
 
 export const metadata = { title: "Admin · Monitoring Kinerja Kredit" };
@@ -26,15 +26,21 @@ export default async function AdminPage() {
   const { data } = (await supabase?.auth.getUser()) ?? { data: { user: null } };
   const user = data?.user ?? null;
 
+  // Proxy sudah memastikan ada sesi; di sini yang dicek adalah hak admin.
+  // User biasa boleh membuka dashboard, tetapi tidak boleh mengunggah data.
+  const isAdmin = !isSupabaseConfigured || isAdminEmail(user?.email);
+
   // Ketersediaan service role hanya dicek keberadaannya; nilainya tidak
   // pernah dikirim ke browser.
   const uploadEnabled = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  const logsQuery = await supabase
-    ?.from("upload_logs")
-    .select("id, dataset, file_name, row_count, uploaded_by, created_at")
-    .order("created_at", { ascending: false })
-    .limit(8);
+  const logsQuery = isAdmin
+    ? await supabase
+        ?.from("upload_logs")
+        .select("id, dataset, file_name, row_count, uploaded_by, created_at")
+        .order("created_at", { ascending: false })
+        .limit(8)
+    : null;
 
   const logs = (logsQuery?.data ?? []) as unknown as UploadLog[];
 
@@ -70,7 +76,25 @@ export default async function AdminPage() {
         </div>
       </header>
 
-      {isSupabaseConfigured ? (
+      {isSupabaseConfigured && !isAdmin ? (
+        <NeuCard>
+          <SectionHeader
+            eyebrow="Akses Ditolak"
+            title="Akun Anda tidak memiliki hak admin"
+            icon={<ShieldX size={18} />}
+          />
+          <div className="neu-inset text-ink-700 rounded-2xl p-5 text-sm">
+            <p>
+              Akun <strong>{user?.email}</strong> boleh membuka dashboard, tetapi tidak
+              terdaftar sebagai admin sehingga tidak bisa mengunggah data.
+            </p>
+            <p className="mt-3">
+              Minta pengelola aplikasi menambahkan email tersebut ke environment{" "}
+              <code className="text-bni-teal-700">ADMIN_EMAILS</code>, lalu masuk kembali.
+            </p>
+          </div>
+        </NeuCard>
+      ) : isSupabaseConfigured ? (
         <div className="space-y-5">
           <ExcelUploader enabled={uploadEnabled} />
 

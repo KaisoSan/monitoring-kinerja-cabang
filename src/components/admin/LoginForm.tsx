@@ -5,6 +5,7 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { KeyRound, Loader2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { safeNextPath } from "@/lib/navigation";
 
 export function LoginForm({ nextPath }: { nextPath: string }) {
   const router = useRouter();
@@ -44,7 +45,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
 
     toast.success("Login berhasil.", { id: toastId });
     // `refresh` memastikan proxy membaca cookie sesi yang baru dibuat.
-    router.replace(nextPath.startsWith("/admin") ? nextPath : "/admin");
+    router.replace(safeNextPath(nextPath));
     router.refresh();
   }
 

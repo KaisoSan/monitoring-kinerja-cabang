@@ -92,6 +92,18 @@ export async function loadDashboardData(): Promise<DashboardData> {
 
   const periode = latest.data?.periode ?? null;
   if (!periode) {
+    // RLS hanya mengizinkan baca untuk sesi yang valid, jadi hasil kosong bisa
+    // berarti tabel memang kosong ATAU sesi sudah kedaluwarsa. Bedakan supaya
+    // pesannya tidak menyesatkan.
+    const { data: session } = await supabase.auth.getUser();
+    if (!session?.user) {
+      return sampleData(
+        "Sesi tidak ditemukan atau sudah berakhir, sehingga data kredit tidak " +
+          "dapat dibaca. Silakan login kembali. Sementara ini dashboard " +
+          "menampilkan data contoh.",
+      );
+    }
+
     return sampleData(
       "Tabel kredit_records masih kosong. Unggah data lewat /admin. " +
         "Sementara ini dashboard menampilkan data contoh.",

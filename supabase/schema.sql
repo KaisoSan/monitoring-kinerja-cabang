@@ -107,14 +107,22 @@ alter table public.kredit_records enable row level security;
 alter table public.target_cabang  enable row level security;
 alter table public.upload_logs    enable row level security;
 
+-- Kebijakan lama yang mengizinkan baca publik dicabut bila masih ada.
+-- Data kredit memuat identitas nasabah (CIF, nomor rekening, nama), sehingga
+-- tidak boleh terbaca hanya dengan memegang anon key.
 drop policy if exists "kredit_records baca publik" on public.kredit_records;
-create policy "kredit_records baca publik"
+drop policy if exists "target_cabang baca publik"  on public.target_cabang;
+
+drop policy if exists "kredit_records baca user login" on public.kredit_records;
+create policy "kredit_records baca user login"
   on public.kredit_records for select
+  to authenticated
   using (true);
 
-drop policy if exists "target_cabang baca publik" on public.target_cabang;
-create policy "target_cabang baca publik"
+drop policy if exists "target_cabang baca user login" on public.target_cabang;
+create policy "target_cabang baca user login"
   on public.target_cabang for select
+  to authenticated
   using (true);
 
 drop policy if exists "upload_logs baca user login" on public.upload_logs;
@@ -124,7 +132,10 @@ create policy "upload_logs baca user login"
   using (true);
 
 -- Catatan keamanan:
--- Kebijakan di atas membuat data kredit bisa dibaca siapa pun yang memegang
--- anon key. Bila dashboard perlu dibatasi ke user internal saja, ganti
--- `for select using (true)` menjadi `for select to authenticated using (true)`
--- lalu wajibkan login pada halaman dashboard.
+-- 1. Tidak ada kebijakan insert/update/delete sama sekali, jadi seluruh
+--    penulisan hanya bisa lewat service role di route /api/upload.
+-- 2. Peran `anon` tidak lagi punya akses baca. Dashboard, /api/records, dan
+--    halaman admin semuanya mensyaratkan sesi Supabase yang valid.
+-- 3. Untuk membatasi per Area Head atau per cabang, ganti `using (true)`
+--    dengan pencocokan terhadap klaim JWT, mis.
+--    `using (area_head = auth.jwt() -> 'user_metadata' ->> 'area_head')`.

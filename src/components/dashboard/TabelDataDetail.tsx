@@ -101,7 +101,7 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
       <SectionHeader
         eyebrow="Data Detail"
         title="Tabel Data Kredit per Rekening"
-        description={`Mengikuti slicer global. Tersedia ${DETAIL_COLUMNS.length} kolom dari file sumber — pilih lewat tombol di kanan.`}
+        description={`Mengikuti slicer global. Tersedia ${DETAIL_COLUMNS.length} kolom dari file sumber — pilih lewat tombol di kanan. Kolom pertama tetap terlihat saat tabel digeser mendatar.`}
         icon={<Table2 size={18} />}
         action={
           <ColumnChooser
@@ -129,21 +129,21 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
       ) : (
         <div className="neu-inset neu-scroll relative max-h-[34rem] overflow-auto rounded-2xl">
           {loading ? (
-            <div className="bg-surface/70 absolute inset-0 z-20 grid place-items-center backdrop-blur-[1px]">
+            <div className="bg-surface/70 absolute inset-0 z-30 grid place-items-center backdrop-blur-[1px]">
               <Loader2 size={22} className="text-bni-teal-700 animate-spin" />
             </div>
           ) : null}
 
           <table className="w-full border-collapse text-sm">
-            <thead className="bg-surface-sunken/95 sticky top-0 z-10 backdrop-blur">
+            <thead>
               <tr>
-                {columns.map((column) => (
+                {columns.map((column, index) => (
                   <th
                     key={column.label}
                     scope="col"
-                    className={`text-ink-500 px-4 py-3 text-[0.68rem] font-bold tracking-wider whitespace-nowrap uppercase ${
+                    className={`bg-surface-sunken text-ink-500 sticky top-0 px-4 py-3 text-[0.68rem] font-bold tracking-wider whitespace-nowrap uppercase ${
                       column.align === "right" ? "text-right" : "text-left"
-                    }`}
+                    } ${index === 0 ? STICKY_HEAD_CLASS : "z-10"}`}
                   >
                     {column.label}
                   </th>
@@ -154,10 +154,15 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
               {rows.map((record) => (
                 <tr
                   key={record.kode_fasilitas}
-                  className="border-surface/60 hover:bg-surface-raised/70 border-t transition-colors"
+                  className="border-surface/60 group hover:bg-surface-raised/70 border-t transition-colors"
                 >
-                  {columns.map((column) => (
-                    <Cell key={column.label} record={record} column={column} />
+                  {columns.map((column, index) => (
+                    <Cell
+                      key={column.label}
+                      record={record}
+                      column={column}
+                      sticky={index === 0}
+                    />
                   ))}
                 </tr>
               ))}
@@ -166,7 +171,7 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
                 <tr>
                   <td
                     colSpan={columns.length}
-                    className="text-ink-500 px-4 py-10 text-center text-sm"
+                    className="text-ink-500 sticky left-0 px-4 py-10 text-center text-sm"
                   >
                     Tidak ada data untuk filter ini.
                   </td>
@@ -213,7 +218,25 @@ export function TabelDataDetail({ slicer }: { slicer: SlicerState }) {
   );
 }
 
-function Cell({ record, column }: { record: KreditRecord; column: DetailColumn }) {
+/**
+ * Kolom pertama dibuat lengket agar identitas baris tetap terbaca saat tabel
+ * digeser mendatar — dengan 86 kolom aktif lebarnya bisa lebih dari 10.000px.
+ * Sel lengket wajib punya latar solid, kalau tidak isi kolom lain akan
+ * tembus di baliknya saat digeser.
+ */
+const STICKY_SHADOW = "shadow-[8px_0_10px_-10px_rgba(30,42,50,0.45)]";
+const STICKY_HEAD_CLASS = `sticky left-0 z-20 border-r border-ink-300/40 ${STICKY_SHADOW}`;
+const STICKY_CELL_CLASS = `sticky left-0 z-[5] border-r border-ink-300/40 bg-surface group-hover:bg-surface-raised ${STICKY_SHADOW}`;
+
+function Cell({
+  record,
+  column,
+  sticky = false,
+}: {
+  record: KreditRecord;
+  column: DetailColumn;
+  sticky?: boolean;
+}) {
   const value = getCellValue(record, column);
   const display = formatCell(value, column);
 
@@ -221,7 +244,7 @@ function Cell({ record, column }: { record: KreditRecord; column: DetailColumn }
     <td
       className={`text-ink-700 px-4 py-2.5 whitespace-nowrap ${
         column.align === "right" ? "text-right tabular-nums" : "text-left"
-      }`}
+      } ${sticky ? STICKY_CELL_CLASS : ""}`}
       title={column.format === "currency" && typeof value === "number" ? formatRupiah(value) : undefined}
     >
       {display}

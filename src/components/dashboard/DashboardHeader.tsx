@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LayoutDashboard, Settings2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { LogoutButton } from "@/components/admin/LogoutButton";
 import { formatPeriode } from "@/lib/format";
 import type { DashboardSource } from "@/lib/data";
 
@@ -8,10 +9,13 @@ export function DashboardHeader({
   periode,
   source,
   totalRows,
+  userEmail,
 }: {
   periode: string | null;
   source: DashboardSource;
   totalRows: number;
+  /** Email sesi aktif; kosong saat berjalan dengan data contoh. */
+  userEmail: string | null;
 }) {
   return (
     <header className="neu mb-5 rounded-3xl p-5 sm:p-6">
@@ -29,6 +33,7 @@ export function DashboardHeader({
             </h1>
             <p className="text-ink-500 mt-1 text-sm">
               Periode {formatPeriode(periode)} · {totalRows.toLocaleString("id-ID")} data kredit
+              {userEmail ? ` · ${userEmail}` : ""}
             </p>
           </div>
         </div>
@@ -44,6 +49,7 @@ export function DashboardHeader({
             <Settings2 size={15} />
             Admin
           </Link>
+          {userEmail ? <LogoutButton /> : null}
         </div>
       </div>
     </header>

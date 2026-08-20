@@ -54,6 +54,10 @@ slicer global. Tombol **Pilih Kolom** membuka daftar checkbox berisi seluruh
   pencentangan, supaya posisinya tidak berpindah-pindah.
 - Tersedia pencarian nama kolom serta tombol **Pilih Semua**, **Kosongkan**,
   dan **Kolom Esensial**.
+- **Kolom pertama bersifat lengket (sticky)**: identitas baris tetap terlihat
+  saat tabel digeser mendatar. Dengan 86 kolom aktif lebar tabelnya lebih dari
+  10.000px, dan scroll-nya terkurung di dalam kartu sehingga halaman tidak
+  ikut melebar.
 - Data diambil per halaman (50 baris) lewat `GET /api/records`, sehingga
   membuka 86 kolom tidak membebani payload dashboard.
 
@@ -62,6 +66,19 @@ setiap baris menyimpan **snapshot kolom asli** pada kolom `raw` (JSONB),
 dikunci nama kolom aslinya dalam snake_case. Kolom yang punya padanan field
 bertipe (mis. `Bk Debet` -> `baki_debet`) tetap jatuh ke field tersebut bila
 snapshot kosong, misalnya pada data yang diunggah sebelum fitur ini ada.
+
+### Akses & Peran
+Begitu Supabase dikonfigurasi, **seluruh permukaan yang menyentuh data kredit
+mewajibkan login**: dashboard, `/api/records`, dan halaman admin. Ada dua
+tingkat akses:
+
+| Peran | Syarat | Boleh |
+|---|---|---|
+| Pengguna | Punya akun Supabase yang valid | Membuka dashboard dan Tabel Data Detail |
+| Admin | Akun Supabase **dan** emailnya ada di `ADMIN_EMAILS` | Semua di atas, plus mengunggah data di `/admin` |
+
+Pengguna yang sudah login tetapi bukan admin akan melihat pesan penolakan yang
+jelas di `/admin`, bukan dilempar bolak-balik ke halaman login.
 
 ### Halaman Admin (`/admin`)
 Dilindungi Supabase Auth + allowlist email. Berisi area **drag & drop** untuk
@@ -76,7 +93,8 @@ file `.xlsx` / `.xls` / `.xlsm` / `.csv` yang:
 - memberi notifikasi toast untuk status loading, sukses, dan error.
 
 ### Berjalan tanpa Supabase
-Bila environment Supabase belum diisi, dashboard otomatis menampilkan
+Bila environment Supabase belum diisi, tidak ada data asli yang bisa dibuka,
+sehingga login tidak diwajibkan dan dashboard otomatis menampilkan
 **dataset contoh deterministik** (12 cabang, 3 Area Head, 3 produk, ~30
 pengelola) sehingga UI langsung bisa dinilai. Sebuah banner menandai bahwa
 data yang tampil adalah data contoh.
@@ -135,11 +153,17 @@ ADMIN_EMAILS=pimpinan@bank.co.id,admin@bank.co.id
 > `SUPABASE_SERVICE_ROLE_KEY` **tidak** boleh diberi awalan `NEXT_PUBLIC_`.
 > Key ini hanya dibaca di server oleh route `/api/upload`.
 
-### Langkah 4 — Buat user admin
+### Langkah 4 — Buat user
 
 Di Supabase Studio buka *Authentication → Users → Add user*, isi email dan
-password, lalu centang **Auto Confirm User**. Pastikan email tersebut terdaftar
-pada `ADMIN_EMAILS`.
+password, lalu centang **Auto Confirm User**. Buat satu akun untuk setiap orang
+yang perlu membuka dashboard.
+
+Email yang juga perlu mengunggah data harus didaftarkan pada `ADMIN_EMAILS`.
+Akun lain tetap bisa membuka dashboard, tetapi tidak bisa mengunggah.
+
+> Bila `ADMIN_EMAILS` dikosongkan, **setiap** user Supabase yang berhasil login
+> dianggap admin. Selalu isi di produksi.
 
 ### Langkah 5 — Jalankan ulang & unggah
 
@@ -226,12 +250,13 @@ src/
 ├── lib/
 │   ├── columns.ts               Definisi 86 kolom + kolom default
 │   ├── excel.ts                 Pembersih header + parser workbook
+│   ├── navigation.ts            Penyaring redirect `next` (anti open redirect)
 │   ├── metrics.ts               Seluruh agregasi & rumus pilar
 │   ├── data.ts                  Pemuat data Supabase + fallback contoh
 │   ├── sample-data.ts           Dataset contoh deterministik
 │   ├── format.ts                Format rupiah, persen, periode
 │   └── supabase/                Klien browser, server, dan service role
-├── proxy.ts                     Penjaga rute /admin
+├── proxy.ts                     Penjaga sesi untuk /, /admin, dan /api/records
 supabase/schema.sql              Skema tabel, index, trigger, RLS
 scripts/generate-template.mjs    Pembuat file Excel contoh
 tests/                           Uji parser & pembacaan workbook
@@ -279,20 +304,36 @@ Ambang batas indikator (`NPL_WARN`, `NPL_BAD`, `LAR_WARN`, `LAR_BAD`) diatur di
 
 ## Catatan Keamanan
 
-- **RLS aktif** pada seluruh tabel. Dashboard hanya membaca; seluruh penulisan
-  melewati route `/api/upload` yang memakai service role di server.
-- Route upload memverifikasi sesi Supabase **dan** allowlist `ADMIN_EMAILS`,
-  lalu menyaring ulang setiap baris di server — payload dari browser tidak
-  pernah dipercaya apa adanya.
-- **Tabel Data Detail memaparkan field level rekening** (CIF, nomor rekening,
-  nama nasabah) lewat `GET /api/records`. Endpoint ini mengikuti kebijakan RLS
-  `kredit_records`; dengan kebijakan bawaan yang mengizinkan baca publik, data
-  tersebut dapat diakses siapa pun yang mengetahui URL-nya. Perketat dulu
-  sebelum dipakai produksi.
-- Kebijakan bawaan mengizinkan `select` publik pada data kredit. Bila dashboard
-  perlu dibatasi ke user internal, ubah kebijakan tersebut menjadi
-  `to authenticated` (lihat catatan di akhir `supabase/schema.sql`) dan
-  wajibkan login pada halaman dashboard.
+### Lapisan akses data
+
+Data kredit memuat identitas nasabah (CIF, nomor rekening, nama), sehingga
+dijaga berlapis — satu lapis bocor tidak langsung membuka datanya:
+
+1. **RLS di database.** `kredit_records`, `target_cabang`, dan `upload_logs`
+   hanya mengizinkan `select` untuk peran `authenticated`. Peran `anon` tidak
+   punya akses baca sama sekali, jadi memegang anon key saja tidak cukup.
+   Tidak ada kebijakan `insert`/`update`/`delete`, sehingga seluruh penulisan
+   hanya mungkin lewat service role.
+2. **Proxy rute.** `src/proxy.ts` mewajibkan sesi Supabase untuk `/`,
+   `/admin/*`, dan `/api/records`. Rute halaman dialihkan ke halaman login,
+   sedangkan rute `/api/*` menjawab `401` JSON agar pemanggil menerima
+   kegagalan yang bisa ditangani, bukan HTML halaman login.
+3. **Pemeriksaan di dalam route.** `/api/records` dan `/api/upload`
+   memverifikasi sesinya sendiri, tidak menyandarkan diri pada proxy — kalau
+   suatu saat matcher proxy meleset, endpoint tetap tertutup.
+
+`/api/upload` menambah satu syarat lagi: email pemanggil harus ada di
+`ADMIN_EMAILS`, dan setiap baris disaring ulang di server sehingga payload dari
+browser tidak pernah dipercaya apa adanya.
+
+### Hal lain
+
+- Parameter `next` pada halaman login disaring `safeNextPath()` sehingga hanya
+  menerima path internal — mencegah open redirect ke domain lain.
+- Service role key hanya dibaca di server dan tidak pernah dikirim ke browser.
+- Untuk membatasi akses per Area Head atau per cabang, ganti `using (true)`
+  pada kebijakan RLS dengan pencocokan klaim JWT — contohnya ada di akhir
+  `supabase/schema.sql`.
 - **Dependensi `xlsx`.** Versi di registry npm (`0.18.5`) memiliki dua advisory
   (prototype pollution & ReDoS) yang perbaikannya hanya dirilis lewat CDN resmi
   SheetJS. Bila jaringan Anda mengizinkan, pasang versi yang sudah diperbaiki:
