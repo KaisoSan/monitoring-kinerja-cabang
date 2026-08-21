@@ -156,7 +156,7 @@ export const UPLOAD_DATASETS = [
 export type UploadDataset = (typeof UPLOAD_DATASETS)[number];
 
 export const UPLOAD_DATASET_LABELS: Record<UploadDataset, string> = {
-  kredit_records: "SL 18 - Data Kredit (per debitur / fasilitas)",
+  kredit_records: "SL - Data Kredit (per debitur / fasilitas)",
   target_cabang: "Target Cabang (per produk)",
   dpk_looser: "DPK - Top 30 Looser (satu sheet per outlet)",
   akun_records: "Data Akun (sheet OLD_ACCOUNT / NEW_ACCOUNT)",
